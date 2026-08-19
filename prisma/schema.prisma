@@ -1,0 +1,1313 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                  String          @id @default(uuid())
+  uhid                String?         @unique
+  name                String
+  email               String?         @unique
+  mobile              String          @unique
+  password            String?
+  role                Role            @default(USER)
+  avatarUrl           String?
+  healthScore         Int             @default(0)
+  dob                 String?
+  gender              String?
+  bloodGroup          String?
+  altMobile           String?
+  emailVerified       Boolean         @default(false)
+  emailVerifiedAt     DateTime?
+  otpHash             String?
+  otpExpiresAt        DateTime?
+  otpAttempts         Int             @default(0)
+  otpLastSentAt       DateTime?
+  createdAt           DateTime        @default(now())
+  addresses           Address[]
+  bookings            Booking[]
+  familyMembers       Family[]
+  paymentMethods      PaymentMethod[]
+  upiMethods          UpiMethod[]
+  verifiedReports     Report[]        @relation("ReportVerifier")
+  paymentsReceived    Booking[]       @relation("PaymentReceiver")
+  assignedCollections Booking[]       @relation("AssignedExecutive")
+  prescriptions       Prescription[]
+  adminUser           AdminUser?
+  auditLogs           AuditLog[]
+  pathologyPartner    PathologyPartner?
+  conversations       Conversation[]
+  deviceTokens        DeviceToken[]
+  notifications       Notification[]
+bookingIntents      BookingIntent[]
+  partnerRatings      PartnerRating[]
+}
+model City {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  icon      String   @default("city")
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
+model Address {
+  id        String  @id @default(uuid())
+  userId    String
+  type      String
+  line1     String
+  line2     String?
+  city      String
+  state     String
+  pincode   String
+  isDefault Boolean @default(false)
+  user      User    @relation(fields: [userId], references: [id])
+}
+
+model PaymentMethod {
+  id        String   @id @default(uuid())
+  userId    String
+  cardBrand String
+  last4     String
+  holder    String
+  expiry    String
+  isPrimary Boolean  @default(false)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+}
+model UpiMethod {
+  id        String   @id @default(uuid())
+  userId    String
+  upiId     String
+  provider  String
+  isPrimary Boolean  @default(false)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+}
+
+model Family {
+  id       String @id @default(uuid())
+  userId   String
+  name     String
+  relation String
+  age      Int
+  gender   String
+  user     User   @relation(fields: [userId], references: [id])
+}
+
+model TestCategory {
+  id           String  @id
+  name         String
+  iconName     String
+  iconUrl      String?
+  slug         String  @unique
+  testCount    String  @default("0+")
+  displayOrder Int     @default(0)
+  isActive     Boolean @default(true)
+  tests        Test[]
+}
+
+model Test {
+  id              String          @id @default(uuid())
+  name            String
+  description     String
+  price           Float
+  discountedPrice Float
+  categoryId      String
+  reportTime      String
+  fastingRequired Boolean
+  homeCollection  Boolean         @default(true)
+  labVisit        Boolean         @default(true)
+  whyRequired     String?
+  preparation     String?
+  imageUrl        String?
+  badge           String?
+  isFeatured      Boolean         @default(false)
+  isPopular       Boolean         @default(false)
+  isTrending      Boolean         @default(false)
+  displayOrder    Int             @default(0)
+  rating          Float           @default(0)
+  reviewCount     Int             @default(0)
+  isActive        Boolean         @default(true)
+  bookings        BookingTest[]
+  packages        PackageTest[]
+  category        TestCategory    @relation(fields: [categoryId], references: [id])
+  parameters      TestParameter[]
+
+  @@index([categoryId])
+  @@index([isFeatured])
+  @@index([isPopular])
+  @@index([isTrending])
+}
+
+model TestParameter {
+  id              String         @id @default(uuid())
+  testId          String
+  name            String
+  unit            String
+  referenceRanges Json
+  isActive        Boolean        @default(true)
+  reportResults   ReportResult[]
+  test            Test           @relation(fields: [testId], references: [id], onDelete: Cascade)
+}
+
+model HealthPackage {
+  id              String           @id @default(uuid())
+  name            String
+  subtitle        String?
+  category        String           @default("General")
+  categoryId      String           @default("general")
+  description     String?
+  price           Float
+  oldPrice        Float
+  discount        String?
+  parametersCount Int
+  badge           String?
+  preparation     String?
+  reportTime      String           @default("24 Hours")
+  fastingRequired Boolean          @default(false)
+  homeCollection  Boolean          @default(true)
+  labVisit        Boolean          @default(true)
+isFeatured      Boolean          @default(false)
+isPopular       Boolean          @default(false)
+isTrending      Boolean          @default(false)
+displayOrder    Int              @default(0)
+isActive        Boolean          @default(true)
+bookings        BookingPackage[]
+testsIncluded   PackageTest[]
+}
+model PackageTest {
+  packageId String
+  testId    String
+  package   HealthPackage @relation(fields: [packageId], references: [id])
+  test      Test          @relation(fields: [testId], references: [id])
+
+  @@id([packageId, testId])
+}
+
+model BookingIntent {
+  id               String    @id @default(cuid())
+  razorpayOrderId  String    @unique
+  idempotencyKey   String    @unique
+  userId           String
+  status           String    @default("PENDING_PAYMENT")
+  bookingPayload   Json
+  pricingSnapshot  Json
+  expiresAt        DateTime
+  completedAt      DateTime?
+  bookingId        String?   @unique
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  user             User      @relation(fields: [userId], references: [id])
+  booking          Booking?  @relation(fields: [bookingId], references: [id])
+
+  @@index([razorpayOrderId])
+  @@index([userId])
+  @@index([status])
+  @@index([expiresAt])
+}
+
+model Booking {
+  id                   String              @id @default(cuid())
+  bookingCode          String              @unique
+  userId               String
+  scheduledDate        DateTime
+  scheduledSlot        String
+  totalPaid            Float
+  status               BookingStatus       @default(PENDING)
+  addressId            String
+  branchId             String?
+  patientName          String
+  patientAge           Int?
+  patientGender        String?
+  patientMobile        String?
+  paymentId            String?
+  razorpayOrderId      String?
+  paymentLinkId        String?
+  paymentLinkUrl       String?
+  paymentStatus        PaymentStatus       @default(PENDING)
+  collectionMode       CollectionMode      @default(HOME)
+  paymentMode          PaymentMode?
+  paymentReceivedAt    DateTime?
+  paymentReceivedById  String?
+assignedExecutiveId  String?
+  assignedPartnerId    String?
+  partnerAssignedAt    DateTime?
+  partnerAcceptedAt    DateTime?
+  collectionStartedAt  DateTime?
+  sampleCollectedAt    DateTime?
+  deliveredToLabAt     DateTime?
+partnerNote          String?
+  collectionOtp        String?
+  otpVerified          Boolean             @default(false)
+  rejectionReason      String?
+  labReviewedAt        DateTime?
+  labReviewedById      String?
+  createdAt            DateTime            @default(now())
+  user                 User                @relation(fields: [userId], references: [id])
+  branch               Branch?             @relation(fields: [branchId], references: [id])
+  packages             BookingPackage[]
+  tests                BookingTest[]
+  report               Report?
+  paymentReceivedBy    User?               @relation("PaymentReceiver", fields: [paymentReceivedById], references: [id])
+  assignedExecutive    User?               @relation("AssignedExecutive", fields: [assignedExecutiveId], references: [id])
+  assignedPartner      PathologyPartner?   @relation("AssignedPartner", fields: [assignedPartnerId], references: [id])
+statusTimeline       BookingStatusLog[]
+  rejections           BookingRejection[]
+  prescriptions        Prescription[]
+sample               Sample?
+sampleDelivery       SampleDelivery?
+  payment              Payment?            @relation("BookingPayment")
+  bookingIntent        BookingIntent?
+  partnerRating        PartnerRating?
+}
+model Branch {
+  id                  String    @id @default(uuid())
+  name                String
+  code                String    @unique
+  line1               String
+  city                String
+  state               String
+  pincode             String
+  latitude            Float?
+  longitude           Float?
+  contactNumber       String?
+  email               String?
+  labRegNo            String?
+  workingHours        String?
+  availableSlots      Json?
+  homeCollection      Boolean   @default(true)
+  labVisit            Boolean   @default(true)
+  isActive            Boolean   @default(true)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+bookings            Booking[]
+  reports             Report[]  @relation("ReportBranch")
+  sampleDeliveries    SampleDelivery[] @relation("DeliveryBranch")
+}
+model BookingTest {
+  bookingId String
+  testId    String
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  test      Test    @relation(fields: [testId], references: [id])
+
+  @@id([bookingId, testId])
+}
+
+model BookingPackage {
+  bookingId String
+  packageId String
+  booking   Booking       @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  package   HealthPackage @relation(fields: [packageId], references: [id])
+
+  @@id([bookingId, packageId])
+}
+model Report {
+  id                   String           @id @default(uuid())
+  bookingId            String           @unique
+  testName             String
+  reportedDate         DateTime         @default(now())
+  status               ReportStatus     @default(DRAFT)
+  clinicalNotes        String?
+  technicianRemarks    String?
+  doctorRemarks        String?
+  internalNotes        String?
+  hasAbnormalFlags     Boolean          @default(false)
+  verifiedById         String?
+  verifiedAt           DateTime?
+  recipientType        String?
+  recipientId          String?
+  pdfUrl               String?
+  pdfPublicId          String?
+  pdfUploadedAt        DateTime?
+  reportBranchId       String?
+  doctorName           String?
+  doctorQualification  String?
+  doctorRegNo          String?
+  doctorDesignation    String?
+  doctorVerifiedAt     DateTime?
+  booking              Booking          @relation(fields: [bookingId], references: [id])
+  verifiedBy           User?            @relation("ReportVerifier", fields: [verifiedById], references: [id])
+  reportBranch         Branch?          @relation("ReportBranch", fields: [reportBranchId], references: [id])
+  parameters           ReportResult[]
+  auditLogs            ReportAuditLog[]
+
+  @@index([reportedDate])
+}
+model ReportResult {
+  id             String         @id @default(uuid())
+  reportId       String
+  parameterId    String?
+  parameterName  String
+  observedValue  String
+  unit           String
+  referenceRange String
+  isAbnormal     Boolean        @default(false)
+  parameter      TestParameter? @relation(fields: [parameterId], references: [id])
+  report         Report         @relation(fields: [reportId], references: [id])
+}
+
+enum Role {
+  USER
+  ADMIN
+  PATHOLOGIST
+  EXECUTIVE
+  SUPER_ADMIN
+  FRANCHISE
+  LAB_DEPARTMENT
+  PATHOLOGY_PARTNER
+}
+model AdminRole {
+  id          String           @id @default(uuid())
+  name        String           @unique
+  slug        String           @unique
+  description String?
+  isSystem    Boolean          @default(false)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  permissions RolePermission[]
+  adminUsers  AdminUser[]
+}
+
+model Permission {
+  id          String           @id @default(uuid())
+  module      String
+  action      String
+  description String?
+  rolePerms   RolePermission[]
+
+  @@unique([module, action])
+}
+
+model RolePermission {
+  id           String     @id @default(uuid())
+  roleId       String
+  permissionId String
+  role         AdminRole  @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+}
+
+model AdminUser {
+  id                String              @id @default(uuid())
+  userId            String              @unique
+  roleId            String
+  franchiseId       String?
+  department        String?
+  isActive          Boolean             @default(true)
+  createdAt         DateTime            @default(now())
+  user              User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role              AdminRole           @relation(fields: [roleId], references: [id])
+  assignedChats     Conversation[]
+  supportAssignments SupportAssignment[]
+}
+model AuditLog {
+  id              String   @id @default(uuid())
+  userId          String
+  action          String
+  module          String
+  entityType      String?
+  entityId        String?
+  performedByRole String?
+  branchId        String?
+  ipAddress       String?
+  userAgent       String?
+  requestId       String?
+  severity        String   @default("LOW")
+  status          String   @default("SUCCESS")
+  metadata        Json?
+  createdAt       DateTime @default(now())
+  user            User     @relation(fields: [userId], references: [id])
+
+  @@index([module])
+  @@index([action])
+  @@index([severity])
+  @@index([createdAt])
+  @@index([userId])
+}
+
+model ApiRequestLog {
+  id           String   @id @default(uuid())
+  method       String
+  path         String
+  statusCode   Int
+  latencyMs    Int
+  ip           String?
+  userId       String?
+  userRole     String?
+  requestId    String?
+  userAgent    String?
+  branchId     String?
+  responseSize Int?
+  createdAt    DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([statusCode])
+  @@index([method])
+  @@index([userId])
+}
+
+enum CollectionMode {
+  HOME
+  LAB
+}
+
+enum PaymentMode {
+  CASH
+  UPI
+  QR_CODE
+  CARD
+}
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  REFUNDED
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  WAITING_FOR_ASSIGNMENT
+  WAITING_FOR_PARTNER
+  ASSIGNED
+  ACCEPTED
+  ON_THE_WAY
+  REACHED_LOCATION
+  SAMPLE_COLLECTED
+  SELECTING_DELIVERY_BRANCH
+  DELIVERING_TO_BRANCH
+  DELIVERED_TO_LAB
+  PROCESSING
+  REPORT_READY
+  COMPLETED
+  CANCELLED
+  REJECTED
+  PATIENT_REACHED_LAB
+}
+
+model BookingStatusLog {
+  id        String        @id @default(uuid())
+  bookingId String
+  status    BookingStatus
+  note      String?
+  updatedBy String?
+  createdAt DateTime      @default(now())
+  booking   Booking       @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+}
+
+enum ReportStatus {
+  DRAFT
+  UNDER_REVIEW
+  APPROVED
+  RELEASED
+}
+
+model ReportAuditLog {
+  id         String   @id @default(uuid())
+  reportId   String
+  action     String
+  performedBy String
+  details    String?
+  createdAt  DateTime @default(now())
+  report     Report   @relation(fields: [reportId], references: [id], onDelete: Cascade)
+}
+
+model Offer {
+  id          String    @id @default(uuid())
+  title       String
+  description String?
+  bannerUrl   String?
+  offerType   String    @default("FLAT")
+  discount    Float
+  startDate   DateTime?
+  endDate     DateTime?
+  priority    Int       @default(0)
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model PathologyPartner {
+  id               String                @id @default(uuid())
+  userId           String                @unique
+  labName          String
+  role             String
+  cityId           String?
+  branchId         String?
+  address          String?
+  latitude         Float?
+  longitude        Float?
+  approvalStatus   PartnerApprovalStatus @default(PENDING)
+  rejectionReason  String?
+  isAvailable      Boolean               @default(false)
+  availability     Json?
+  rating           Float                 @default(0)
+  totalCollections Int                   @default(0)
+  totalRatings     Int                   @default(0)
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+  user             User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bookings         Booking[]             @relation("AssignedPartner")
+  sampleDeliveries SampleDelivery[]
+  ratings          PartnerRating[]
+}
+enum PartnerApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  SUSPENDED
+}
+
+model PartnerRating {
+  id          String           @id @default(uuid())
+  bookingId   String           @unique
+  partnerId   String
+  userId      String
+  rating      Int
+  review      String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  booking     Booking          @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  partner     PathologyPartner @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([partnerId])
+  @@index([userId])
+  @@index([bookingId])
+}
+
+model BookingRejection {
+  id        String   @id @default(uuid())
+  bookingId String
+  partnerId String
+  reason    String?
+  createdAt DateTime @default(now())
+  booking   Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@unique([bookingId, partnerId])
+}
+
+model Prescription {
+  id               String             @id @default(uuid())
+  userId           String
+  bookingId        String?
+  fileUrl          String
+  publicId         String
+  originalFileName String
+  fileType         String
+  mimeType         String
+  fileSize         Int
+  notes            String?
+  status           PrescriptionStatus @default(PENDING)
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  user             User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  booking          Booking?           @relation(fields: [bookingId], references: [id])
+
+  @@index([userId])
+  @@index([status])
+}
+
+enum PrescriptionStatus {
+  PENDING
+  UNDER_REVIEW
+  REVIEWED
+  COMPLETED
+}
+
+model Conversation {
+  id           String             @id @default(uuid())
+  userId       String
+  status       ConversationStatus @default(AI_ACTIVE)
+  assignedToId String?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assignedTo   AdminUser?         @relation(fields: [assignedToId], references: [id])
+  messages     ChatMessage[]
+  assignments  SupportAssignment[]
+}
+
+model ChatMessage {
+  id             String        @id @default(uuid())
+  conversationId String
+  senderType     SenderType
+  senderId       String
+  text           String?
+  attachmentUrl  String?
+  attachmentType String?
+  isRead         Boolean       @default(false)
+  deliveredAt    DateTime?
+  readAt         DateTime?
+  createdAt      DateTime      @default(now())
+  conversation   Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@index([createdAt])
+}
+
+model SupportAssignment {
+  id             String       @id @default(uuid())
+  conversationId String
+  adminUserId    String
+  assignedAt     DateTime     @default(now())
+  closedAt       DateTime?
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  adminUser      AdminUser    @relation(fields: [adminUserId], references: [id])
+}
+
+enum ConversationStatus {
+  AI_ACTIVE
+  PENDING_HUMAN
+  HUMAN_ACTIVE
+  CLOSED
+}
+
+enum SenderType {
+  USER
+  BOT
+  AGENT
+}
+
+model SampleDelivery {
+  id              String           @id @default(uuid())
+  bookingId       String           @unique
+  partnerId       String
+  branchId        String
+  selectedAt      DateTime         @default(now())
+  deliveryStartedAt DateTime?
+  deliveredAt     DateTime?
+  status          SampleDeliveryStatus @default(SELECTED)
+  booking         Booking          @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  partner         PathologyPartner @relation(fields: [partnerId], references: [id])
+  branch          Branch           @relation("DeliveryBranch", fields: [branchId], references: [id])
+
+  @@index([bookingId])
+  @@index([partnerId])
+  @@index([branchId])
+}
+
+enum SampleDeliveryStatus {
+  SELECTED
+  IN_TRANSIT
+  DELIVERED
+}
+
+model Sample {
+  id              String        @id @default(uuid())
+  bookingId       String        @unique
+  accessionNumber String        @unique
+  sampleType      String
+  condition       SampleCondition @default(GOOD)
+  receivedAt      DateTime      @default(now())
+  receivedById    String
+  rejectionReason String?
+  notes           String?
+  status          SampleStatus  @default(RECEIVED)
+  processingStartedAt DateTime?
+  branchId        String?
+  booking         Booking       @relation(fields: [bookingId], references: [id])
+
+  @@index([status])
+  @@index([bookingId])
+}
+
+enum SampleCondition {
+  GOOD
+  HAEMOLYSED
+  INSUFFICIENT
+  LEAKED
+}
+
+enum SampleStatus {
+  RECEIVED
+  ACCESSIONED
+  PROCESSING
+  COMPLETED
+  REJECTED
+}
+
+model Coupon {
+  id                    String    @id @default(uuid())
+  code                  String    @unique
+  name                  String?
+  description           String?
+  discountType          String    @default("PERCENTAGE")
+  discountValue         Float
+  minOrderAmount        Float     @default(0)
+  maxDiscount           Float?
+  usageLimit            Int?
+  perUserLimit          Int       @default(1)
+  usedCount             Int       @default(0)
+  expiresAt             DateTime?
+  startsAt              DateTime?
+  isActive              Boolean   @default(true)
+  isFirstOrderOnly      Boolean   @default(false)
+  applicableUserType    String?
+  applicablePaymentMode String?
+  applicableCollectionMode String?
+  applicableCityIds     String[]  @default([])
+  applicableBranchIds   String[]  @default([])
+  applicableTestIds     String[]  @default([])
+  applicablePackageIds  String[]  @default([])
+  createdById           String?
+  updatedById           String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  redemptions           CouponRedemption[]
+  auditLogs             CouponAuditLog[]
+}
+
+model CouponRedemption {
+  id        String   @id @default(uuid())
+  couponId  String
+  userId    String
+  bookingId String?  @unique
+  discount  Float
+  createdAt DateTime @default(now())
+  coupon    Coupon   @relation(fields: [couponId], references: [id])
+
+  @@unique([couponId, userId, bookingId])
+  @@index([userId])
+  @@index([couponId])
+}
+
+model CouponAuditLog {
+  id              String   @id @default(uuid())
+  couponId        String
+  couponCode      String
+  action          String
+  performedById   String?
+  performedByRole String? 
+  ipAddress       String?
+  details         Json?
+  createdAt       DateTime @default(now())
+  coupon          Coupon   @relation(fields: [couponId], references: [id], onDelete: Cascade)
+
+  @@index([couponId])
+  @@index([action])
+}
+model Payment {
+  id                  String          @id @default(uuid())
+  bookingId           String          @unique
+  razorpayOrderId     String?         @unique
+  razorpayPaymentId   String?         @unique
+  razorpaySignature   String?
+  amount              Float
+  subtotal            Float           @default(0)
+  discount            Float           @default(0)
+  couponDiscount      Float           @default(0)
+  collectionCharge    Float           @default(0)
+  gst                 Float           @default(0)
+  platformFee         Float           @default(0)
+  couponCode          String?
+  couponId            String?
+  tax                 Float           @default(0)
+  currency            String          @default("INR")
+  method              String?
+  gateway             String          @default("RAZORPAY")
+  status              PaymentTxStatus @default(PENDING)
+  invoiceNumber       String?         @unique
+  receiptNumber       String?         @unique
+  invoiceUrl          String?
+  invoicePublicId     String?
+  invoiceGeneratedAt  DateTime?
+  receiptUrl          String?
+  receiptPublicId     String?
+  receiptGeneratedAt  DateTime?
+  paymentReference    String?
+  collectedById       String?
+  branchId            String?
+  paidAt              DateTime?
+  failureReason       String?
+  webhookVerified     Boolean         @default(false)
+  idempotencyKey      String?         @unique
+  metadata            Json?
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  booking             Booking         @relation("BookingPayment", fields: [bookingId], references: [id])
+  refunds             Refund[]
+  attempts            PaymentAttempt[]
+  financeAuditLogs    FinanceAuditLog[]
+
+  @@index([status])
+  @@index([paidAt])
+  @@index([razorpayOrderId])
+  @@index([razorpayPaymentId])
+  @@index([createdAt])
+}
+
+
+model PaymentAttempt {
+  id                String   @id @default(uuid())
+  paymentId         String
+  razorpayOrderId   String?
+  razorpayPaymentId String?
+  status            String
+  errorCode         String?
+  errorDescription  String?
+  method            String?
+  metadata          Json?
+  createdAt         DateTime @default(now())
+  payment           Payment  @relation(fields: [paymentId], references: [id])
+
+  @@index([paymentId])
+  @@index([createdAt])
+}
+
+
+model WebhookEvent {
+  id            String   @id @default(uuid())
+  eventId       String   @unique
+  event         String
+  razorpayOrderId String?
+  payload       Json
+  processed     Boolean  @default(false)
+  processedAt   DateTime?
+  error         String?
+  createdAt     DateTime @default(now())
+
+  @@index([eventId])
+  @@index([event])
+  @@index([createdAt])
+  @@index([razorpayOrderId])
+}
+
+model PricingSnapshot {
+  id               String   @id @default(uuid())
+  bookingId        String   @unique
+  testIds          String[]
+  packageIds       String[]
+  subtotal         Float
+  testDiscount     Float
+  couponCode       String?
+  couponId         String?
+  couponDiscount   Float
+  collectionCharge Float
+  gst              Float
+  platformFee      Float
+  finalAmount      Float
+  collectionMode   String
+  snapshotAt       DateTime @default(now())
+
+  @@index([bookingId])
+}
+
+
+model InvoiceSequence {
+  id        String @id @default("singleton")
+  lastInvoiceSeq Int @default(0)
+  lastReceiptSeq Int @default(0)
+  updatedAt DateTime @updatedAt
+}
+model Refund {
+  id                  String        @id @default(uuid())
+  paymentId           String
+  bookingId           String
+  razorpayRefundId    String?       @unique
+  amount              Float
+  reason              String
+  approvalNotes       String?
+  status              RefundStatus  @default(PENDING)
+  requestedById       String?
+  approvedById        String?
+  processedAt         DateTime?
+  gatewayResponse     Json?
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+  payment             Payment       @relation(fields: [paymentId], references: [id])
+  financeAuditLogs    FinanceAuditLog[]
+
+  @@index([status])
+  @@index([bookingId])
+}
+
+model Settlement {
+  id                  String            @id @default(uuid())
+  settlementRef       String            @unique @default(cuid())
+  franchiseId         String?
+  franchiseName       String
+  period              String
+  periodStart         DateTime
+  periodEnd           DateTime
+  totalBusiness       Float
+  commissionRate      Float             @default(15)
+  commissionAmount    Float
+  deductions          Float             @default(0)
+  taxOnCommission     Float             @default(0)
+  netPayable          Float
+  status              SettlementStatus  @default(PENDING)
+  approvedById        String?
+  payoutReference     String?
+  gatewayResponse     Json?
+  processedAt         DateTime?
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  financeAuditLogs    FinanceAuditLog[]
+
+  @@index([status])
+  @@index([periodStart])
+}
+
+model FinanceAuditLog {
+  id              String      @id @default(uuid())
+  action          String
+  module          String
+  paymentId       String?
+  refundId        String?
+  settlementId    String?
+  bookingRef      String?
+  txReference     String?
+  performedById   String?
+  performedByRole String?
+  ipAddress       String?
+  details         Json?
+  createdAt       DateTime    @default(now())
+  payment         Payment?    @relation(fields: [paymentId], references: [id])
+  refund          Refund?     @relation(fields: [refundId], references: [id])
+  settlement      Settlement? @relation(fields: [settlementId], references: [id])
+
+  @@index([action])
+  @@index([createdAt])
+}
+
+enum PaymentTxStatus {
+  PENDING
+  CAPTURED
+  FAILED
+  REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+enum RefundStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum SettlementStatus {
+  PENDING
+  APPROVED
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+model Supplier {
+  id            String      @id @default(uuid())
+  name          String
+  contactPerson String?
+  phone         String?
+  email         String?
+  gstNumber     String?
+  address       String?
+  isActive      Boolean     @default(true)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  inventoryItems InventoryItem[]
+  purchaseOrders PurchaseOrder[]
+}
+
+model InventoryItem {
+  id               String      @id @default(uuid())
+  sku              String      @unique
+  name             String
+  category         String
+  itemType         InventoryItemType @default(REAGENT)
+  supplierId       String?
+  manufacturer     String?
+  unit             String
+  currentStock     Float       @default(0)
+  minThreshold     Float       @default(0)
+  maxCapacity      Float?
+  batchNumber      String?
+  lotNumber        String?
+  manufacturingDate DateTime?
+  expiryDate       DateTime?
+  purchaseCost     Float?
+  branchId         String?
+  isActive         Boolean     @default(true)
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  supplier         Supplier?   @relation(fields: [supplierId], references: [id])
+  transactions     InventoryTransaction[]
+  consumptionRules TestConsumptionRule[]
+  purchaseOrderItems PurchaseOrderItem[]
+
+  @@index([branchId])
+  @@index([itemType])
+  @@index([expiryDate])
+}
+
+enum InventoryItemType {
+  REAGENT
+  CONSUMABLE
+  CHEMICAL
+  COLLECTION_KIT
+  TEST_KIT
+}
+
+model InventoryTransaction {
+  id              String      @id @default(uuid())
+  inventoryItemId String
+  transactionType TransactionType
+  quantity        Float
+  quantityBefore  Float
+  quantityAfter   Float
+  reason          String?
+  referenceNumber String?
+  remarks         String?
+  performedById   String?
+  branchId        String?
+  createdAt       DateTime    @default(now())
+  inventoryItem   InventoryItem @relation(fields: [inventoryItemId], references: [id])
+
+  @@index([inventoryItemId])
+  @@index([transactionType])
+  @@index([createdAt])
+}
+
+enum TransactionType {
+  STOCK_IN
+  STOCK_OUT
+  ADJUSTMENT
+  DAMAGED
+  EXPIRED
+  TRANSFER_IN
+  TRANSFER_OUT
+  AUTO_CONSUMED
+}
+
+model TestConsumptionRule {
+  id              String        @id @default(uuid())
+  testId          String
+  inventoryItemId String
+  quantityPerTest Float         @default(1)
+  isActive        Boolean       @default(true)
+  createdAt       DateTime      @default(now())
+  inventoryItem   InventoryItem @relation(fields: [inventoryItemId], references: [id])
+
+  @@unique([testId, inventoryItemId])
+  @@index([testId])
+}
+
+model PurchaseOrder {
+  id               String      @id @default(uuid())
+  poNumber         String      @unique
+  supplierId       String
+  purchaseDate     DateTime    @default(now())
+  expectedDelivery DateTime?
+  receivedDate     DateTime?
+  status           POStatus    @default(PENDING)
+  createdById      String?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  supplier         Supplier    @relation(fields: [supplierId], references: [id])
+  items            PurchaseOrderItem[]
+}
+
+model PurchaseOrderItem {
+  id              String        @id @default(uuid())
+  purchaseOrderId String
+  inventoryItemId String
+  quantity        Float
+  receivedQty     Float         @default(0)
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  inventoryItem   InventoryItem @relation(fields: [inventoryItemId], references: [id])
+
+  @@index([purchaseOrderId])
+}
+
+enum POStatus {
+  PENDING
+  PARTIAL
+  RECEIVED
+  CANCELLED
+}
+
+model CmsBanner {
+  id            String    @id @default(uuid())
+  title         String
+  subtitle      String?
+  description   String?
+  imageUrl      String
+  imagePublicId String?
+  linkType      String    @default("Package")
+  linkValue     String?
+  priority      Int       @default(0)
+  displayOrder  Int       @default(0)
+  startDate     DateTime?
+  endDate       DateTime?
+  cities        String[]  @default([])
+  branches      String[]  @default([])
+  isActive      Boolean   @default(true)
+  createdById   String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model CmsConfig {
+  id              String   @id @default("singleton")
+  layoutSections  Json     @default("[]")
+  categoryOrder   Json     @default("[]")
+  featureFlags    Json     @default("{}")
+  maintenance     Json     @default("{}")
+  minVersion      Json     @default("{}")
+  contactInfo     Json     @default("{}")
+  socialLinks     Json     @default("{}")
+  updatedAt       DateTime @updatedAt
+  updatedById     String?
+}
+
+model CmsEmergencyAlert {
+  id          String    @id @default(uuid())
+  title       String
+  message     String
+  severity    String    @default("info")
+  startTime   DateTime  @default(now())
+  endTime     DateTime?
+  cities      String[]  @default([])
+  branches    String[]  @default([])
+  isActive    Boolean   @default(true)
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model CmsPage {
+  id          String   @id
+  title       String
+  slug        String   @unique
+  content     String
+  isActive    Boolean  @default(true)
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model SystemSettings {
+  id                         String   @id @default("singleton")
+  minimumHomeCollectionAmount Float    @default(0)
+  homeCollectionCharge        Float    @default(0)
+  defaultPartnerCommission    Float    @default(0)
+  labOpenTime                 String   @default("06:00")
+  labCloseTime                String   @default("22:00")
+  reportDeliveryMode          ReportDeliveryMode @default(AUTO_PUSH)
+  currency                    String   @default("INR")
+  timezone                    String   @default("Asia/Kolkata")
+  platformVersion             String   @default("1.0.0")
+  maintenanceMode             Boolean  @default(false)
+  allowBookings               Boolean  @default(true)
+  allowPartnerRegistration    Boolean  @default(true)
+  updatedBy                   String?
+  updatedAt                   DateTime @updatedAt
+  createdAt                   DateTime @default(now())
+}
+
+enum ReportDeliveryMode {
+  AUTO_PUSH
+  MANUAL_DISPATCH
+}
+
+model CmsAuditLog {
+  id               String   @id @default(uuid())
+  adminId          String?
+  adminRole        String?
+  action           String
+  resource         String
+  resourceId       String?
+  details          Json?
+  createdAt        DateTime @default(now())
+}
+
+model DeviceToken {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String
+  platform  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, token])
+  @@index([userId])
+}
+
+model Notification {
+  id         String             @id @default(uuid())
+  userId     String
+  title      String
+  body       String
+  type       NotificationType
+  data       Json?
+  isRead     Boolean            @default(false)
+  readAt     DateTime?
+  deepLink   String?
+  createdAt  DateTime           @default(now())
+  user       User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@index([userId, createdAt])
+}
+
+model NotificationLog {
+  id          String              @id @default(uuid())
+  userId      String?
+  title       String
+  body        String
+  type        NotificationType
+  status      NotificationStatus  @default(PENDING)
+  fcmResponse Json?
+  error       String?
+  retryCount  Int                 @default(0)
+  sentAt      DateTime?
+  createdAt   DateTime            @default(now())
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+enum NotificationType {
+  PARTNER_RATING_REQUEST
+  BOOKING_CREATED
+  BOOKING_ACCEPTED
+  BOOKING_REJECTED
+  BOOKING_CANCELLED
+  BOOKING_RESCHEDULED
+  PARTNER_ON_THE_WAY
+  PARTNER_ARRIVED
+  SAMPLE_COLLECTED
+  SAMPLE_RECEIVED_IN_LAB
+  REPORT_READY
+  REPORT_SENT
+  REPORT_APPROVED
+  PAYMENT_SUCCESS
+  PAYMENT_FAILED
+ NEW_BOOKING_ASSIGNED
+  BOOKING_CANCELLED_BY_USER
+  PATIENT_REACHED_LAB
+  BOOKING_COMPLETED
+  NEW_CHAT_MESSAGE
+  SUPPORT_REPLY
+  NEW_OFFER
+  NEW_PACKAGE
+  PRICE_UPDATE
+  APPOINTMENT_REMINDER
+  MISSED_APPOINTMENT
+  BROADCAST
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+  RETRYING
+}
