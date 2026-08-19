@@ -12,12 +12,13 @@ import {
   processSettlement,
   executeRefund,
 } from '../controllers/financeController';
-import { authenticate } from '../middlewares/authMiddleware';
+import { authenticate, authorizeRoles } from '../middlewares/authMiddleware';
 import { strictLimiter } from '../middlewares/rateLimiter';
 
 const router = Router();
 
 router.use(authenticate);
+router.use(authorizeRoles('ADMIN', 'SUPER_ADMIN'));
 
 router.get('/payment-summary', getPaymentSummary);
 router.get('/payments', getPayments);
