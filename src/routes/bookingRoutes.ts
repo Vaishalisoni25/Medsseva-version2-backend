@@ -37,7 +37,7 @@ router.patch('/:id/assign-executive', authorizeRoles('ADMIN', 'SUPER_ADMIN'), as
 router.patch('/:id/assign-partner', authorizeRoles('ADMIN', 'SUPER_ADMIN'), assignPartner);
 router.patch('/:id/accept-lab', authorizeRoles('ADMIN', 'SUPER_ADMIN', 'PATHOLOGIST'), acceptLabBooking);
 router.patch('/:id/reject-lab', authorizeRoles('ADMIN', 'SUPER_ADMIN', 'PATHOLOGIST'), rejectLabBooking);
-router.patch('/:id/patient-reached', patientReachedLab);
+router.patch('/:id/patient-reached', authorizeRoles('USER', 'ADMIN', 'SUPER_ADMIN', 'PATHOLOGIST'), patientReachedLab);
 router.patch('/:id/update-lab-status', authorizeRoles('ADMIN', 'SUPER_ADMIN', 'PATHOLOGIST'), updateLabStatus);
 router.patch('/:id/collect-sample', authorizeRoles('ADMIN', 'PATHOLOGIST', 'EXECUTIVE'), collectSample);
 router.get('/:id/collection-otp', generateCollectionOtp);

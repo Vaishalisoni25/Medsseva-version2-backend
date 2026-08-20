@@ -586,8 +586,11 @@ export const assignExecutive = async (req: any, res: Response) => {
 export const generateCollectionOtp = async (req: any, res: Response) => {
   try {
     const { id } = req.params;
+    const partner = await prisma.pathologyPartner.findUnique({ where: { userId: req.user.id } });
+    if (!partner) return res.status(404).json({ error: 'Partner not found.' });
     const booking = await prisma.booking.findUnique({ where: { id } });
     if (!booking) return res.status(404).json({ error: 'Booking not found.' });
+    if (booking.assignedPartnerId !== partner.id) return res.status(403).json({ error: 'Not your booking.' });
     if (booking.paymentStatus === 'SUCCESS') return res.json({ otpRequired: false });
     if (booking.collectionOtp) return res.json({ otpRequired: true, otp: booking.collectionOtp });
 
@@ -668,7 +671,9 @@ export const patientReachedLab = async (req: any, res: Response) => {
     if (!booking) return res.status(404).json({ error: 'Booking not found.' });
     if (booking.collectionMode !== 'LAB') return res.status(400).json({ error: 'Only valid for Lab Visit bookings.' });
     if (booking.status !== 'CONFIRMED') return res.status(400).json({ error: 'Booking must be CONFIRMED before patient can mark arrival.' });
-    if (booking.userId !== req.user.id) return res.status(403).json({ error: 'Only the booking owner can mark arrival.' });
+    if (booking.userId !== req.user.id && !['ADMIN', 'SUPER_ADMIN', 'PATHOLOGIST'].includes(req.user.role)) {
+      return res.status(403).json({ error: 'Only the booking owner or lab staff can mark arrival.' });
+    }
 
     const updated = await prisma.booking.update({ where: { id }, data: { status: 'PATIENT_REACHED_LAB' } });
     await prisma.bookingStatusLog.create({ data: { bookingId: id, status: 'PATIENT_REACHED_LAB', note: 'Patient marked arrival at the lab', updatedBy: req.user.id } });
