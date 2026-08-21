@@ -4,19 +4,23 @@ import { uploadToCloudinary } from '../middlewares/upload';
 import { PrescriptionStatus } from '@prisma/client';
 
 export const prescriptionController = {
-async upload(req: Request, res: Response) {
+  async upload(req: Request, res: Response) {
     try {
       const file = req.file;
       if (!file) {
+        console.warn('[Prescription Backend] No file received in req.file');
         return res.status(400).json({ message: 'No file uploaded.' });
       }
 
       const userId = (req as any).user?.id;
       if (!userId) {
+        console.warn('[Prescription Backend] Unauthorized request');
         return res.status(401).json({ message: 'Unauthorized.' });
       }
 
+      console.log(`[Prescription Backend] Uploading file "${file.originalname}" (${file.size} bytes) for userId: ${userId}`);
       const { secure_url, public_id } = await uploadToCloudinary(file.buffer, file.originalname, file.mimetype);
+      console.log(`[Prescription Backend] Cloudinary upload successful: ${secure_url}`);
 
       const ext = (file.originalname.split('.').pop() || '').toLowerCase();
       const isImage = ['jpg', 'jpeg', 'png', 'webp'].includes(ext);
@@ -36,10 +40,11 @@ async upload(req: Request, res: Response) {
 
       return res.status(201).json({ success: true, data: prescription });
     } catch (error: any) {
+      console.error('[Prescription Backend] Upload error:', error);
       if (error.message?.startsWith('INVALID_FILE_TYPE:')) {
         return res.status(400).json({ message: error.message.split(':')[1] });
       }
-      return res.status(500).json({ message: 'Upload failed. Please try again.' });
+      return res.status(500).json({ message: 'Upload failed. Please try again.', error: error.message });
     }
   },
 
