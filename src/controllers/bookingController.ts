@@ -65,8 +65,9 @@ function generateBookingCode(): string {
 }
 
 const mapPaymentMethodToMode = (paymentMethod: string | undefined): 'CASH' | 'UPI' | undefined => {
-  if (paymentMethod === 'cash') return 'CASH';
-  if (paymentMethod === 'upi') return 'UPI';
+  const m = String(paymentMethod || '').toLowerCase();
+  if (m === 'cash' || m === 'pay_at_home' || m === 'cod' || m === 'lab_walkin') return 'CASH';
+  if (m === 'upi' || m === 'online') return 'UPI';
   return undefined;
 };
 
@@ -215,7 +216,7 @@ const user = await prisma.user.findUnique({ where: { id: req.user.id } });
       return res.status(400).json({ error: 'At least one test or package is required to create a booking.' });
     }
 
-    const safeCollectionMode = collectionMode === 'lab' ? 'LAB' : 'HOME';
+    const safeCollectionMode = String(collectionMode || '').toLowerCase() === 'lab' ? 'LAB' : 'HOME';
 
     const pricing = await pricingService.calculate({
       testIds,
