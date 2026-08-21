@@ -1,7 +1,9 @@
 const BREVO_API_URL = 'https://api.brevo.com/v3/smtp/email';
 
-const SENDER_NAME = process.env.BREVO_SENDER_NAME || 'MedsSeva';
-const SENDER_EMAIL = process.env.BREVO_SENDER_EMAIL || 'medssevaofficial@gmail.com';
+const getSender = () => ({
+  name: (process.env.BREVO_SENDER_NAME || '').trim() || 'vaishalisoni',
+  email: (process.env.BREVO_SENDER_EMAIL || '').trim() || 'vaishalisoni02004@gmail.com',
+});
 
 function buildOtpEmailHtml(userName: string, otp: string): string {
   return `
@@ -118,7 +120,7 @@ export async function sendOtpEmail(toEmail: string, toName: string, otp: string)
   if (!apiKey) throw new Error('BREVO_API_KEY is not configured');
 
   const payload = {
-    sender: { name: SENDER_NAME, email: SENDER_EMAIL },
+    sender: getSender(),
     to: [{ email: toEmail, name: toName }],
     subject: 'Verify your MedsSeva Account',
     htmlContent: buildOtpEmailHtml(toName, otp),
@@ -144,7 +146,7 @@ export async function sendPasswordResetEmail(toEmail: string, toName: string, ot
   if (!apiKey) throw new Error('BREVO_API_KEY is not configured');
 
   const payload = {
-    sender: { name: SENDER_NAME, email: SENDER_EMAIL },
+    sender: getSender(),
     to: [{ email: toEmail, name: toName }],
     subject: 'Reset your MedsSeva Password',
     htmlContent: buildPasswordResetEmailHtml(toName, otp),
