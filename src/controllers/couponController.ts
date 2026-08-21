@@ -231,11 +231,11 @@ export const validateCoupon = async (req: Request, res: Response) => {
       }
     }
 
-    if (coupon.applicableCollectionMode && collectionMode && coupon.applicableCollectionMode !== collectionMode) {
+    if (coupon.applicableCollectionMode && collectionMode && coupon.applicableCollectionMode.toUpperCase() !== collectionMode.toUpperCase()) {
       return res.status(400).json({ valid: false, error: `This coupon is valid for ${coupon.applicableCollectionMode} only` });
     }
 
-    if (coupon.applicablePaymentMode && paymentMode && coupon.applicablePaymentMode !== paymentMode) {
+    if (coupon.applicablePaymentMode && paymentMode && coupon.applicablePaymentMode.toUpperCase() !== paymentMode.toUpperCase()) {
       return res.status(400).json({ valid: false, error: `This coupon is valid for ${coupon.applicablePaymentMode} payments only` });
     }
 
