@@ -246,7 +246,7 @@ const user = await prisma.user.findUnique({ where: { id: req.user.id } });
       finalAddressId = defaultAddr.id;
     }
 
-    const parsedDate = new Date(scheduledDate);
+    const parsedDate = scheduledDate ? new Date(scheduledDate) : new Date(Date.now() + 86400000);
     if (isNaN(parsedDate.getTime())) return res.status(400).json({ error: 'Invalid booking date.' });
 
     const now = new Date();

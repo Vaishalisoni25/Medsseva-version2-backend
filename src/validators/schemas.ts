@@ -3,7 +3,7 @@ import { z } from 'zod';
 export const createBookingSchema = z.object({
   testIds: z.array(z.string()).optional().default([]),
   packageIds: z.array(z.string()).optional().default([]),
-  scheduledDate: z.string().min(1, 'Scheduled date is required'),
+  scheduledDate: z.string().nullable().optional(),
   scheduledSlot: z.string().nullable().optional(),
   patientName: z.string().min(1, 'Patient name is required'),
   patientAge: z.union([z.number(), z.string(), z.null()]).optional(),
