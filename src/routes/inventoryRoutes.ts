@@ -15,6 +15,7 @@ import {
   getPurchaseOrders,
   createPurchaseOrder,
   receiveGRN,
+  bulkUpdateStock,
 } from '../controllers/inventoryController';
 import { authenticate } from '../middlewares/authMiddleware';
 
@@ -29,6 +30,7 @@ router.post('/suppliers', createSupplier);
 router.get('/purchase-orders', getPurchaseOrders);
 router.post('/purchase-orders', createPurchaseOrder);
 router.post('/grn', receiveGRN);
+router.post('/bulk-update', bulkUpdateStock);
 router.post('/stock-in', stockIn);
 router.post('/stock-out', stockOut);
 router.post('/adjustment', stockAdjustment);

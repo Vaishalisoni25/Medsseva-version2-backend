@@ -3,6 +3,7 @@ import { AuthRequest } from '../middlewares/authMiddleware';
 import { autoConsumeForTest } from './inventoryController';
 import { sendNotificationToUser } from '../services/notification.service';
 import { prisma } from '../lib/prisma';
+import { uploadToCloudinary } from '../middlewares/upload';
 
 export const getBookingsForReport = async (req: AuthRequest, res: Response) => {
   try {
@@ -473,5 +474,53 @@ export const getMyReports = async (req: AuthRequest, res: Response) => {
   } catch (error: any) {
     console.error('Failed to fetch reports:', error);
     res.status(500).json({ error: 'Failed to fetch reports', details: error.message });
+  }
+};
+
+export const uploadReportPdf = async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    if (!req.user?.id) return res.status(401).json({ error: 'Unauthorized' });
+
+    if (!req.file) {
+      return res.status(400).json({ error: 'PDF file is required' });
+    }
+
+    const report = await prisma.report.findUnique({ where: { id } });
+    if (!report) return res.status(404).json({ error: 'Report not found' });
+
+    const { secure_url, public_id } = await uploadToCloudinary(req.file.buffer, req.file.originalname, req.file.mimetype, 'medseva/reports');
+
+    const updated = await prisma.report.update({
+      where: { id },
+      data: {
+        pdfUrl: secure_url,
+        pdfPublicId: public_id,
+        pdfUploadedAt: new Date(),
+        auditLogs: {
+          create: {
+            action: 'PDF_UPLOADED',
+            performedBy: req.user.id,
+            details: `Finalized PDF uploaded to Cloudinary`,
+          },
+        },
+      },
+      include: {
+        parameters: true,
+        auditLogs: true,
+        reportBranch: true,
+        booking: {
+          include: {
+            user: { select: { name: true, mobile: true, email: true } },
+            branch: true,
+          },
+        },
+      },
+    });
+
+    res.json(updated);
+  } catch (error: any) {
+    console.error('Failed to upload report PDF:', error);
+    res.status(500).json({ error: 'Failed to upload report PDF', details: error.message });
   }
 };
