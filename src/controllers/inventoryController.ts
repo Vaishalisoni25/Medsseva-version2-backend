@@ -180,6 +180,67 @@ export const stockAdjustment = async (req: Request, res: Response) => {
   }
 };
 
+export const bulkUpdateStock = async (req: Request, res: Response) => {
+  try {
+    const { updates, branchId } = req.body;
+    if (!Array.isArray(updates) || updates.length === 0) {
+      return res.status(400).json({ error: 'Updates array is required' });
+    }
+
+    const results = await prisma.$transaction(async (tx) => {
+      const successfulUpdates = [];
+      for (const update of updates) {
+        const { inventoryItemId, quantity, transactionType, reason, referenceNumber, remarks } = update;
+        if (!inventoryItemId || !quantity || quantity <= 0) continue;
+
+        const item = await tx.inventoryItem.findUnique({ where: { id: inventoryItemId } });
+        if (!item) continue;
+
+        const quantityBefore = item.currentStock;
+        let quantityAfter = quantityBefore;
+
+        if (transactionType === 'STOCK_IN') {
+          quantityAfter = quantityBefore + quantity;
+        } else if (transactionType === 'STOCK_OUT') {
+          if (quantityBefore < quantity) continue; // Skip if insufficient stock
+          quantityAfter = quantityBefore - quantity;
+        } else if (['ADJUSTMENT', 'DAMAGED', 'EXPIRED'].includes(transactionType)) {
+          quantityAfter = Math.max(0, quantityBefore - quantity);
+        } else {
+          continue; // Invalid type
+        }
+
+        const updatedItem = await tx.inventoryItem.update({
+          where: { id: inventoryItemId },
+          data: { currentStock: quantityAfter },
+        });
+
+        await tx.inventoryTransaction.create({
+          data: {
+            inventoryItemId,
+            transactionType,
+            quantity,
+            quantityBefore,
+            quantityAfter,
+            reason: reason || 'Bulk Update',
+            referenceNumber,
+            remarks,
+            performedById: (req as any).user?.id,
+            branchId,
+          },
+        });
+
+        successfulUpdates.push(updatedItem);
+      }
+      return successfulUpdates;
+    });
+
+    res.json({ success: true, updatedCount: results.length, data: results });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Bulk update failed', details: error.message });
+  }
+};
+
 export const branchTransfer = async (req: Request, res: Response) => {
   try {
     const { inventoryItemId, quantity, fromBranchId, toBranchId, reason, referenceNumber, remarks } = req.body;

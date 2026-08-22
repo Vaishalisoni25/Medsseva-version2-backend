@@ -10,8 +10,12 @@ import {
   getReportById,
   getBookingsForReport,
   savePdfUrl,
+  uploadReportPdf,
 } from '../controllers/reportController';
 import { authenticate, authorizeRoles } from '../middlewares/authMiddleware';
+import multer from 'multer';
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 const router = Router();
 
@@ -25,5 +29,6 @@ router.patch('/:id/verify', authenticate, authorizeRoles('ADMIN', 'PATHOLOGIST',
 router.patch('/:id/finalize', authenticate, authorizeRoles('ADMIN', 'PATHOLOGIST', 'SUPER_ADMIN'), finalizeReport);
 router.patch('/:id/send', authenticate, authorizeRoles('ADMIN', 'PATHOLOGIST', 'SUPER_ADMIN'), sendReport);
 router.patch('/:id/pdf-url', authenticate, authorizeRoles('ADMIN', 'PATHOLOGIST', 'SUPER_ADMIN'), savePdfUrl);
+router.post('/:id/upload-pdf', authenticate, authorizeRoles('ADMIN', 'PATHOLOGIST', 'SUPER_ADMIN'), upload.single('pdf'), uploadReportPdf);
 
 export default router;
