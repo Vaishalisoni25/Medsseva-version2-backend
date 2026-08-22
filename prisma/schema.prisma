@@ -38,6 +38,7 @@ model User {
   assignedCollections Booking[]       @relation("AssignedExecutive")
   prescriptions       Prescription[]
   adminUser           AdminUser?
+  doctor              Doctor?
   auditLogs           AuditLog[]
   pathologyPartner    PathologyPartner?
   conversations       Conversation[]
@@ -287,6 +288,8 @@ model Branch {
 bookings            Booking[]
   reports             Report[]  @relation("ReportBranch")
   sampleDeliveries    SampleDelivery[] @relation("DeliveryBranch")
+  doctors             Doctor[]
+  adminUsers          AdminUser[]
 }
 model BookingTest {
   bookingId String
@@ -393,17 +396,45 @@ model RolePermission {
 }
 
 model AdminUser {
-  id                String              @id @default(uuid())
-  userId            String              @unique
-  roleId            String
-  franchiseId       String?
-  department        String?
-  isActive          Boolean             @default(true)
-  createdAt         DateTime            @default(now())
-  user              User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  role              AdminRole           @relation(fields: [roleId], references: [id])
-  assignedChats     Conversation[]
-  supportAssignments SupportAssignment[]
+  id                  String              @id @default(uuid())
+  userId              String              @unique
+  roleId              String
+  franchiseId         String?
+  department          String?
+  designation         String?
+  qualification       String?
+  registrationNo      String?
+  signatureUrl        String?
+  branchId            String?
+  partnerId           String?
+  userType            String?             @default("STAFF")
+  isActive            Boolean             @default(true)
+  createdAt           DateTime            @default(now())
+  user                User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role                AdminRole           @relation(fields: [roleId], references: [id])
+  branch              Branch?             @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  assignedChats       Conversation[]
+  supportAssignments   SupportAssignment[]
+}
+
+model Doctor {
+  id              String    @id @default(uuid())
+  userId          String?   @unique
+  name            String
+  qualification   String
+  registrationNo  String
+  specialization  String?   @default("Pathology")
+  designation     String    @default("Senior Pathologist")
+  photoUrl        String?
+  signatureUrl    String?
+  branchId        String?
+  cityId          String?
+  partnerId       String?
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  user            User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  branch          Branch?   @relation(fields: [branchId], references: [id], onDelete: SetNull)
 }
 model AuditLog {
   id              String   @id @default(uuid())

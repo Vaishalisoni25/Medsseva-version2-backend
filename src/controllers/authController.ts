@@ -294,7 +294,21 @@ export const checkMobile = async (req: Request, res: Response) => {
 
 export const createAdminUser = async (req: Request, res: Response) => {
   try {
-    const { name, email, password, roleId, franchiseId, department } = req.body;
+    const {
+      name,
+      email,
+      password,
+      roleId,
+      franchiseId,
+      department,
+      designation,
+      qualification,
+      registrationNo,
+      signatureUrl,
+      branchId,
+      partnerId,
+      userType = 'STAFF',
+    } = req.body;
 
     if (!name || !email || !password || !roleId) {
       return res.status(400).json({ error: 'name, email, password, roleId are required' });
@@ -314,7 +328,7 @@ export const createAdminUser = async (req: Request, res: Response) => {
 
     const prismaRole = role.slug.toUpperCase().replace(/ /g, '_') as any;
     const validRoles = ['ADMIN', 'FRANCHISE', 'LAB_DEPARTMENT', 'EXECUTIVE', 'PATHOLOGIST'];
-    const userRole = validRoles.includes(prismaRole) ? prismaRole : 'ADMIN';
+    const userRole = validRoles.includes(prismaRole) ? prismaRole : (userType === 'DOCTOR' ? 'PATHOLOGIST' : 'ADMIN');
 
     const mobile = req.body.mobile?.trim() || `adm_${Date.now()}`;
 
@@ -335,19 +349,48 @@ export const createAdminUser = async (req: Request, res: Response) => {
       },
     });
 
-    const adminUser = await prisma.adminUser.create({
+    const adminUser = await (prisma.adminUser as any).create({
       data: {
         userId: user.id,
         roleId,
         franchiseId: franchiseId || null,
         department: department || null,
+        designation: designation || null,
+        qualification: qualification || null,
+        registrationNo: registrationNo || null,
+        signatureUrl: signatureUrl || null,
+        branchId: branchId || null,
+        partnerId: partnerId || null,
+        userType: userType || 'STAFF',
         isActive: true,
       },
       include: {
         role: true,
         user: { select: { id: true, name: true, email: true, role: true } },
+        branch: true,
       },
     });
+
+    // If user is a Doctor or doctor details are provided, sync with Doctor model
+    if (userType === 'DOCTOR' || registrationNo || qualification) {
+      try {
+        await (prisma as any).doctor.create({
+          data: {
+            userId: user.id,
+            name,
+            qualification: qualification || 'MBBS',
+            registrationNo: registrationNo || 'REG-' + Date.now().toString().slice(-6),
+            designation: designation || 'Consultant Pathologist',
+            signatureUrl: signatureUrl || null,
+            branchId: branchId || null,
+            partnerId: partnerId || null,
+            isActive: true,
+          },
+        });
+      } catch (docErr) {
+        console.error('Failed to sync Doctor model:', docErr);
+      }
+    }
 
     res.status(201).json(adminUser);
   } catch (error: any) {
@@ -358,10 +401,11 @@ export const createAdminUser = async (req: Request, res: Response) => {
 
 export const getAdminUsers = async (req: Request, res: Response) => {
   try {
-    const adminUsers = await prisma.adminUser.findMany({
+    const adminUsers = await (prisma.adminUser as any).findMany({
       include: {
         role: true,
         user: { select: { id: true, name: true, email: true, mobile: true, role: true, createdAt: true } },
+        branch: { select: { id: true, name: true, city: true, code: true } },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -374,9 +418,24 @@ export const getAdminUsers = async (req: Request, res: Response) => {
 export const updateAdminUser = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { name, email, password, roleId, franchiseId, department, isActive } = req.body;
+    const {
+      name,
+      email,
+      password,
+      roleId,
+      franchiseId,
+      department,
+      designation,
+      qualification,
+      registrationNo,
+      signatureUrl,
+      branchId,
+      partnerId,
+      userType,
+      isActive,
+    } = req.body;
 
-    const adminUser = await prisma.adminUser.findUnique({
+    const adminUser = await (prisma.adminUser as any).findUnique({
       where: { id },
       include: { user: true, role: true },
     });
@@ -399,16 +458,54 @@ export const updateAdminUser = async (req: Request, res: Response) => {
     if (roleId) adminUpdateData.roleId = roleId;
     if (franchiseId !== undefined) adminUpdateData.franchiseId = franchiseId;
     if (department !== undefined) adminUpdateData.department = department;
+    if (designation !== undefined) adminUpdateData.designation = designation;
+    if (qualification !== undefined) adminUpdateData.qualification = qualification;
+    if (registrationNo !== undefined) adminUpdateData.registrationNo = registrationNo;
+    if (signatureUrl !== undefined) adminUpdateData.signatureUrl = signatureUrl;
+    if (branchId !== undefined) adminUpdateData.branchId = branchId;
+    if (partnerId !== undefined) adminUpdateData.partnerId = partnerId;
+    if (userType !== undefined) adminUpdateData.userType = userType;
     if (isActive !== undefined) adminUpdateData.isActive = isActive;
 
-    const updated = await prisma.adminUser.update({
+    const updated = await (prisma.adminUser as any).update({
       where: { id },
       data: adminUpdateData,
       include: {
         role: true,
         user: { select: { id: true, name: true, email: true, role: true } },
+        branch: true,
       },
     });
+
+    // Update or sync doctor profile if applicable
+    if (userType === 'DOCTOR' || adminUser.userType === 'DOCTOR' || registrationNo) {
+      try {
+        await (prisma as any).doctor.upsert({
+          where: { userId: adminUser.userId },
+          update: {
+            name: name || adminUser.user.name,
+            qualification: qualification || adminUser.qualification || 'MBBS',
+            registrationNo: registrationNo || adminUser.registrationNo || 'REG-DOC',
+            designation: designation || adminUser.designation || 'Consultant Pathologist',
+            signatureUrl: signatureUrl !== undefined ? signatureUrl : adminUser.signatureUrl,
+            branchId: branchId !== undefined ? branchId : adminUser.branchId,
+            isActive: isActive !== undefined ? isActive : adminUser.isActive,
+          },
+          create: {
+            userId: adminUser.userId,
+            name: name || adminUser.user.name,
+            qualification: qualification || 'MBBS',
+            registrationNo: registrationNo || 'REG-DOC',
+            designation: designation || 'Consultant Pathologist',
+            signatureUrl: signatureUrl || null,
+            branchId: branchId || null,
+            isActive: true,
+          },
+        });
+      } catch (docErr) {
+        console.error('Failed to sync Doctor model on update:', docErr);
+      }
+    }
 
     res.json(updated);
   } catch (error: any) {

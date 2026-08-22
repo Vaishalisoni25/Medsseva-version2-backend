@@ -29,6 +29,7 @@ import notificationRoutes from './routes/notificationRoutes';
 import auditRoutes from './routes/auditRoutes';
 import settingsRoutes from './routes/settingsRoutes';
 import ratingRoutes from './routes/ratingRoutes';
+import doctorRoutes from './routes/doctorRoutes';
 import { globalLimiter } from './middlewares/rateLimiter';
 import { errorHandler } from './middlewares/errorHandler';
 import { apiRequestLogger } from './middlewares/apiLogger';
@@ -94,6 +95,7 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/admin/audit-logs', auditRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/ratings', ratingRoutes);
+app.use('/api/doctors', doctorRoutes);
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' });
