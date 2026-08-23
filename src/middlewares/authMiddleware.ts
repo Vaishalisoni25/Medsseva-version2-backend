@@ -49,9 +49,13 @@ export const authenticate = async (req: AuthRequest, res: Response, next: NextFu
       partnerId = adminUser.partnerId || null;
     }
 
+    const effectiveRole = isSuperAdmin
+      ? 'SUPER_ADMIN'
+      : (adminUser ? (decoded.role === 'SUPER_ADMIN' ? 'SUPER_ADMIN' : 'ADMIN') : (decoded.role || 'USER'));
+
     req.user = {
       id: decoded.id,
-      role: decoded.role,
+      role: effectiveRole,
       permissions,
       branchId,
       partnerId,
@@ -72,7 +76,7 @@ export const authorizeRoles = (...roles: string[]) => {
     if (req.user.isSuperAdmin || req.user.role === 'SUPER_ADMIN') {
       return next();
     }
-    if (req.user.role && roles.includes(req.user.role)) {
+    if (req.user.role && (roles.includes(req.user.role) || req.user.role === 'ADMIN')) {
       return next();
     }
     if (req.user.permissions && req.user.permissions.length > 0) {
