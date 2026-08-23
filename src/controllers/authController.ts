@@ -353,8 +353,8 @@ export const createAdminUser = async (req: Request, res: Response) => {
       userType = 'STAFF',
     } = req.body;
 
-    if (!name || !email || !password || !roleId) {
-      return res.status(400).json({ error: 'name, email, password, roleId are required' });
+    if (!name || !email) {
+      return res.status(400).json({ error: 'Name and Email are required' });
     }
 
     const existing = await prisma.user.findUnique({ where: { email } });
@@ -362,14 +362,28 @@ export const createAdminUser = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Email already in use' });
     }
 
-    const role = await prisma.adminRole.findUnique({ where: { id: roleId } });
+    let effectiveRoleId = roleId;
+    let role = null;
+    if (effectiveRoleId) {
+      role = await prisma.adminRole.findUnique({ where: { id: effectiveRoleId } });
+    }
     if (!role) {
-      return res.status(400).json({ error: 'Role not found' });
+      role = await prisma.adminRole.findFirst({
+        where: {
+          slug: { in: ['staff', 'employee', 'lab_department', 'executive', 'admin'] },
+        },
+      }) || await prisma.adminRole.findFirst();
+      effectiveRoleId = role?.id;
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
+    if (!role || !effectiveRoleId) {
+      return res.status(400).json({ error: 'No valid role found in system. Please create a role first.' });
+    }
 
-    const prismaRole = role.slug.toUpperCase().replace(/ /g, '_') as any;
+    const effectivePassword = password || 'MedsSeva@123';
+    const hashedPassword = await bcrypt.hash(effectivePassword, 10);
+
+    const prismaRole = role.slug ? role.slug.toUpperCase().replace(/ /g, '_').replace(/-/g, '_') as any : 'ADMIN';
     const validRoles = ['ADMIN', 'FRANCHISE', 'LAB_DEPARTMENT', 'EXECUTIVE', 'PATHOLOGIST'];
     const userRole = validRoles.includes(prismaRole) ? prismaRole : (userType === 'DOCTOR' ? 'PATHOLOGIST' : 'ADMIN');
 
@@ -395,7 +409,7 @@ export const createAdminUser = async (req: Request, res: Response) => {
     const adminUser = await (prisma.adminUser as any).create({
       data: {
         userId: user.id,
-        roleId,
+        roleId: effectiveRoleId,
         franchiseId: franchiseId || null,
         department: department || null,
         designation: designation || null,
