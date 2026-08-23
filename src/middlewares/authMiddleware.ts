@@ -64,6 +64,8 @@ export const authenticate = async (req: AuthRequest, res: Response, next: NextFu
       ? 'SUPER_ADMIN'
       : (isAdmin ? 'ADMIN' : (userRecord?.role || decoded.role || 'USER'));
 
+    console.log(`\x1b[36m[AUTH]\x1b[0m ${req.method} ${req.originalUrl} | User: ${userRecord?.email || decoded.id} | Role: ${effectiveRole}`);
+
     req.user = {
       id: decoded.id,
       role: effectiveRole,
@@ -75,6 +77,7 @@ export const authenticate = async (req: AuthRequest, res: Response, next: NextFu
 
     next();
   } catch (error) {
+    console.error('\x1b[31m[AUTH ERROR]\x1b[0m Invalid token:', error);
     return res.status(401).json({ error: 'Unauthorized: Invalid token' });
   }
 };
@@ -82,17 +85,22 @@ export const authenticate = async (req: AuthRequest, res: Response, next: NextFu
 export const authorizeRoles = (...roles: string[]) => {
   return (req: AuthRequest, res: Response, next: NextFunction) => {
     if (!req.user) {
+      console.warn(`\x1b[31m[AUTH 401]\x1b[0m No req.user found`);
       return res.status(401).json({ error: 'Unauthorized' });
     }
     if (req.user.isSuperAdmin || req.user.role === 'SUPER_ADMIN' || req.user.role === 'ADMIN') {
+      console.log(`\x1b[32m[AUTH OK]\x1b[0m Admin/SuperAdmin bypass for ${req.method} ${req.originalUrl}`);
       return next();
     }
     if (req.user.role && roles.includes(req.user.role)) {
+      console.log(`\x1b[32m[AUTH OK]\x1b[0m Role match (${req.user.role}) for ${req.method} ${req.originalUrl}`);
       return next();
     }
     if (req.user.permissions && (req.user.permissions.includes('*') || req.user.permissions.length > 0)) {
+      console.log(`\x1b[32m[AUTH OK]\x1b[0m Permissions match for ${req.method} ${req.originalUrl}`);
       return next();
     }
+    console.warn(`\x1b[31m[AUTH 403 FORBIDDEN]\x1b[0m User: ${req.user.role} | Needed: [${roles.join(', ')}] on ${req.method} ${req.originalUrl}`);
     return res.status(403).json({ error: 'Forbidden: Insufficient privileges' });
   };
 };

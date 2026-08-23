@@ -353,12 +353,16 @@ export const createAdminUser = async (req: Request, res: Response) => {
       userType = 'STAFF',
     } = req.body;
 
+    console.log('\x1b[35m[CREATE EMPLOYEE/STAFF]\x1b[0m Incoming payload:', JSON.stringify({ name, email, department, designation, branchId, userType }));
+
     if (!name || !email) {
+      console.warn('\x1b[31m[CREATE EMPLOYEE ERROR]\x1b[0m Name and Email are missing');
       return res.status(400).json({ error: 'Name and Email are required' });
     }
 
     const existing = await prisma.user.findUnique({ where: { email } });
     if (existing) {
+      console.warn('\x1b[31m[CREATE EMPLOYEE ERROR]\x1b[0m Email already in use:', email);
       return res.status(400).json({ error: 'Email already in use' });
     }
 
