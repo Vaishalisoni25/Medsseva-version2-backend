@@ -6,24 +6,38 @@ export async function seedRbac(prisma: PrismaClient) {
 
   // 1. Modules used across the admin panel
   const modules = [
+    'dashboard',
     'users',
+    'patients',
     'bookings',
-    'reports',
+    'home_collection',
+    'lab_tests',
     'tests',
-    'packages',
-    'coupons',
-    'pricing',
+    'reports',
+    'payments',
+    'orders',
     'franchise',
-    'inventory',
-    'finance',
-    'cms',
-    'support',
+    'lab_department',
+    'staff',
     'notifications',
+    'coupons',
+    'packages',
+    'doctors',
+    'pathologies',
+    'support',
     'settings',
+    'roles_permissions',
+    'analytics',
+    'audit_logs',
     'logs',
+    'inventory',
+    'cms',
+    'samples',
+    'pricing',
+    'finance',
   ];
 
-  const actions = ['view', 'create', 'update', 'delete', 'approve'];
+  const actions = ['view', 'create', 'edit', 'update', 'delete', 'export', 'approve', 'assign'];
 
   // 2. Create Permissions (module x action)
   const permissionRecords = [];
@@ -82,8 +96,8 @@ export async function seedRbac(prisma: PrismaClient) {
     });
   }
 
-  // Pathologist -> reports only
-  const pathologistPerms = permissionRecords.filter((p) => p.module === 'reports');
+  // Pathologist -> reports + doctors
+  const pathologistPerms = permissionRecords.filter((p) => ['reports', 'doctors'].includes(p.module));
   for (const perm of pathologistPerms) {
     await prisma.rolePermission.upsert({
       where: { roleId_permissionId: { roleId: roles['pathologist'].id, permissionId: perm.id } },
@@ -94,7 +108,7 @@ export async function seedRbac(prisma: PrismaClient) {
 
   // Executive -> bookings view/update only
   const executivePerms = permissionRecords.filter(
-    (p) => p.module === 'bookings' && ['view', 'update'].includes(p.action),
+    (p) => p.module === 'bookings' && ['view', 'update', 'edit', 'assign'].includes(p.action),
   );
   for (const perm of executivePerms) {
     await prisma.rolePermission.upsert({
@@ -104,9 +118,10 @@ export async function seedRbac(prisma: PrismaClient) {
     });
   }
 
-  // Franchise -> franchise + bookings view
+  // Franchise / Branch Admin -> franchise, bookings, doctors, staff, reports, inventory, dashboard, analytics
   const franchisePerms = permissionRecords.filter(
-    (p) => p.module === 'franchise' || (p.module === 'bookings' && p.action === 'view'),
+    (p) =>
+      ['franchise', 'bookings', 'home_collection', 'doctors', 'staff', 'reports', 'inventory', 'dashboard', 'analytics', 'samples'].includes(p.module),
   );
   for (const perm of franchisePerms) {
     await prisma.rolePermission.upsert({
@@ -116,8 +131,8 @@ export async function seedRbac(prisma: PrismaClient) {
     });
   }
 
-  // Lab Department -> inventory + tests
-  const labPerms = permissionRecords.filter((p) => ['inventory', 'tests'].includes(p.module));
+  // Lab Department -> inventory + tests + samples + reports
+  const labPerms = permissionRecords.filter((p) => ['inventory', 'lab_tests', 'tests', 'samples', 'reports'].includes(p.module));
   for (const perm of labPerms) {
     await prisma.rolePermission.upsert({
       where: { roleId_permissionId: { roleId: roles['lab-department'].id, permissionId: perm.id } },

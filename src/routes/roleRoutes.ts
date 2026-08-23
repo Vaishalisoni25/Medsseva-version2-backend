@@ -13,7 +13,7 @@ router.use(authenticate);
 
 router.get('/permissions', getAllPermissions);
 router.get('/audit-logs', requirePermission('audit_logs.view'), getAuditLogs);
-router.get('/', requirePermission('roles_permissions.view'), getRoles);
+router.get('/', getRoles);
 router.get('/:id', requirePermission('roles_permissions.view'), getRoleById);
 router.post('/', requirePermission('roles_permissions.create'), createRole);
 router.put('/:id', requirePermission('roles_permissions.edit'), updateRole);

@@ -8,6 +8,7 @@ import {
   generateOtp, hashOtp, verifyOtpHash, getOtpExpiry,
   isOtpExpired, isResendAllowed, getResendCooldownRemaining, MAX_ATTEMPTS
 } from '../services/otp.service';
+import { generateUniqueReferralCode } from '../utils/referral.utils';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-medsseva-key';
 
@@ -28,6 +29,7 @@ export const registerPartner = async (req: Request, res: Response) => {
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
+    const referralCode = await generateUniqueReferralCode();
 
     const user = await prisma.user.create({
       data: {
@@ -35,7 +37,8 @@ export const registerPartner = async (req: Request, res: Response) => {
         email: email || undefined,
         mobile,
         password: hashedPassword,
-        role: 'PATHOLOGY_PARTNER'
+        role: 'PATHOLOGY_PARTNER',
+        referralCode,
       }
     });
 
@@ -65,7 +68,7 @@ export const registerPartner = async (req: Request, res: Response) => {
 
 export const register = async (req: Request, res: Response) => {
   try {
-    const { name, email, mobile, password } = req.body;
+    const { name, email, mobile, password, referralCode } = req.body;
 
     if (!name || !email || !mobile || !password) {
       return res.status(400).json({ error: 'name, email, mobile, and password are required' });
@@ -91,10 +94,27 @@ export const register = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Email already in use. Try a different email.' });
     }
 
+    let referredById: string | null = null;
+    let isFirstTestFreeEligible = false;
+
+    // Optional manual referral code
+    if (referralCode && typeof referralCode === 'string' && referralCode.trim() !== '') {
+      const cleanReferral = referralCode.trim().toUpperCase();
+      const referrer = await prisma.user.findUnique({
+        where: { referralCode: cleanReferral },
+      });
+      if (!referrer) {
+        return res.status(400).json({ error: 'Invalid referral code entered. Please check the code or leave it empty.' });
+      }
+      referredById = referrer.id;
+      isFirstTestFreeEligible = true;
+    }
+
     const hashedPassword = await bcrypt.hash(password, 10);
     const otp = generateOtp();
     const otpHash = await hashOtp(otp);
     const otpExpiresAt = getOtpExpiry();
+    const userReferralCode = await generateUniqueReferralCode();
 
     const user = await prisma.user.create({
       data: {
@@ -107,6 +127,9 @@ export const register = async (req: Request, res: Response) => {
         otpExpiresAt,
         otpAttempts: 0,
         otpLastSentAt: new Date(),
+        referralCode: userReferralCode,
+        referredById,
+        isFirstTestFreeEligible,
       }
     });
 
@@ -131,13 +154,21 @@ export const register = async (req: Request, res: Response) => {
 
 export const login = async (req: Request, res: Response) => {
   try {
-    const { mobile, email, password } = req.body;
+    const { mobile, email, identifier, password } = req.body;
+    const inputVal = String(mobile || email || identifier || '').trim();
+
+    if (!inputVal || !password) {
+      return res.status(400).json({ error: 'Mobile/Email and Password are required' });
+    }
 
     let user = null;
-    if (mobile) {
-      user = await prisma.user.findUnique({ where: { mobile } });
-    } else if (email) {
-      user = await prisma.user.findUnique({ where: { email } });
+    if (/^\d{10}$/.test(inputVal)) {
+      user = await prisma.user.findUnique({ where: { mobile: inputVal } });
+    } else {
+      user = await prisma.user.findUnique({ where: { email: inputVal } });
+      if (!user && mobile) {
+        user = await prisma.user.findUnique({ where: { mobile: String(mobile).trim() } });
+      }
     }
 
     if (!user) {
@@ -254,6 +285,15 @@ export const login = async (req: Request, res: Response) => {
       metadata: { mobile: user.mobile, adminRole: adminRoleName },
     }).catch(console.error);
 
+    let userReferralCode = user.referralCode;
+    if (!userReferralCode) {
+      userReferralCode = await generateUniqueReferralCode();
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { referralCode: userReferralCode },
+      });
+    }
+
     res.json({
       message: 'Login successful',
       user: {
@@ -262,6 +302,9 @@ export const login = async (req: Request, res: Response) => {
         mobile: user.mobile,
         email: user.email,
         role: user.role,
+        referralCode: userReferralCode,
+        isFirstTestFreeEligible: user.isFirstTestFreeEligible,
+        firstTestFreeUsed: user.firstTestFreeUsed,
         adminRole: adminRoleName,
         adminRoleSlug,
         permissions,
@@ -365,7 +408,11 @@ export const createAdminUser = async (req: Request, res: Response) => {
         isActive: true,
       },
       include: {
-        role: true,
+        role: {
+          include: {
+            permissions: { include: { permission: true } },
+          },
+        },
         user: { select: { id: true, name: true, email: true, role: true } },
         branch: true,
       },
@@ -403,7 +450,11 @@ export const getAdminUsers = async (req: Request, res: Response) => {
   try {
     const adminUsers = await (prisma.adminUser as any).findMany({
       include: {
-        role: true,
+        role: {
+          include: {
+            permissions: { include: { permission: true } },
+          },
+        },
         user: { select: { id: true, name: true, email: true, mobile: true, role: true, createdAt: true } },
         branch: { select: { id: true, name: true, city: true, code: true } },
       },
@@ -471,7 +522,11 @@ export const updateAdminUser = async (req: Request, res: Response) => {
       where: { id },
       data: adminUpdateData,
       include: {
-        role: true,
+        role: {
+          include: {
+            permissions: { include: { permission: true } },
+          },
+        },
         user: { select: { id: true, name: true, email: true, role: true } },
         branch: true,
       },
@@ -638,6 +693,19 @@ export const getMe = async (req: any, res: Response) => {
       accessibleModules = ['*'];
     }
 
+    let userReferralCode = user.referralCode;
+    if (!userReferralCode) {
+      userReferralCode = await generateUniqueReferralCode();
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { referralCode: userReferralCode },
+      });
+    }
+
+    const totalReferrals = await prisma.user.count({
+      where: { referredById: user.id },
+    });
+
     res.json({
       user: {
         id: user.id,
@@ -645,6 +713,11 @@ export const getMe = async (req: any, res: Response) => {
         mobile: user.mobile,
         email: user.email,
         role: user.role,
+        referralCode: userReferralCode,
+        isFirstTestFreeEligible: user.isFirstTestFreeEligible,
+        firstTestFreeUsed: user.firstTestFreeUsed,
+        totalReferrals,
+        branchId: adminUser?.branchId || null,
         adminRole: adminRoleName,
         adminRoleSlug,
         permissions,
@@ -816,6 +889,9 @@ export const verifyEmailOtp = async (req: Request, res: Response) => {
         mobile: updatedUser.mobile,
         email: updatedUser.email,
         role: updatedUser.role,
+        referralCode: updatedUser.referralCode,
+        isFirstTestFreeEligible: updatedUser.isFirstTestFreeEligible,
+        firstTestFreeUsed: updatedUser.firstTestFreeUsed,
       },
       token,
     });

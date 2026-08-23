@@ -1,13 +1,18 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
+import { AuthRequest } from '../middlewares/authMiddleware';
 
-export const getInventoryItems = async (req: Request, res: Response) => {
+export const getInventoryItems = async (req: AuthRequest, res: Response) => {
   try {
     const { branchId, itemType, status } = req.query;
     const now = new Date();
 
     const where: any = { isActive: true };
-    if (branchId) where.branchId = branchId as string;
+    if (!req.user?.isSuperAdmin && req.user?.branchId) {
+      where.branchId = req.user.branchId;
+    } else if (branchId) {
+      where.branchId = branchId as string;
+    }
     if (itemType) where.itemType = itemType as string;
     if (status === 'low') where.currentStock = { lte: prisma.inventoryItem.fields.minThreshold };
     if (status === 'expired') where.expiryDate = { lt: now };
@@ -290,12 +295,16 @@ export const branchTransfer = async (req: Request, res: Response) => {
   }
 };
 
-export const getTransactions = async (req: Request, res: Response) => {
+export const getTransactions = async (req: AuthRequest, res: Response) => {
   try {
     const { inventoryItemId, branchId, type } = req.query;
     const where: any = {};
     if (inventoryItemId) where.inventoryItemId = inventoryItemId as string;
-    if (branchId) where.branchId = branchId as string;
+    if (!req.user?.isSuperAdmin && req.user?.branchId) {
+      where.branchId = req.user.branchId;
+    } else if (branchId) {
+      where.branchId = branchId as string;
+    }
     if (type) where.transactionType = type as string;
 
     const transactions = await prisma.inventoryTransaction.findMany({
@@ -311,19 +320,22 @@ export const getTransactions = async (req: Request, res: Response) => {
   }
 };
 
-export const getAnalytics = async (req: Request, res: Response) => {
+export const getAnalytics = async (req: AuthRequest, res: Response) => {
   try {
+    const { branchId } = req.query;
+    const effectiveBranchId = !req.user?.isSuperAdmin && req.user?.branchId ? req.user.branchId : (branchId as string | undefined);
+    const branchFilter = effectiveBranchId ? { branchId: effectiveBranchId } : {};
     const now = new Date();
     const thirtyDaysLater = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
     const sixtyDaysLater = new Date(now.getTime() + 60 * 24 * 60 * 60 * 1000);
 
     const [total, lowStock, expired, expiringSoon, expiringIn60, allItems] = await Promise.all([
-      prisma.inventoryItem.count({ where: { isActive: true } }),
-      prisma.inventoryItem.count({ where: { isActive: true, currentStock: { lte: 0 } } }),
-      prisma.inventoryItem.count({ where: { isActive: true, expiryDate: { lt: now } } }),
-      prisma.inventoryItem.count({ where: { isActive: true, expiryDate: { gte: now, lte: thirtyDaysLater } } }),
-      prisma.inventoryItem.count({ where: { isActive: true, expiryDate: { gte: now, lte: sixtyDaysLater } } }),
-      prisma.inventoryItem.findMany({ where: { isActive: true }, select: { currentStock: true, purchaseCost: true, itemType: true, minThreshold: true } }),
+      prisma.inventoryItem.count({ where: { isActive: true, ...branchFilter } }),
+      prisma.inventoryItem.count({ where: { isActive: true, currentStock: { lte: 0 }, ...branchFilter } }),
+      prisma.inventoryItem.count({ where: { isActive: true, expiryDate: { lt: now }, ...branchFilter } }),
+      prisma.inventoryItem.count({ where: { isActive: true, expiryDate: { gte: now, lte: thirtyDaysLater }, ...branchFilter } }),
+      prisma.inventoryItem.count({ where: { isActive: true, expiryDate: { gte: now, lte: sixtyDaysLater }, ...branchFilter } }),
+      prisma.inventoryItem.findMany({ where: { isActive: true, ...branchFilter }, select: { currentStock: true, purchaseCost: true, itemType: true, minThreshold: true } }),
     ]);
 
     const lowStockItems = allItems.filter(i => i.currentStock > 0 && i.currentStock <= i.minThreshold).length;

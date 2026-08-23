@@ -7,11 +7,20 @@ import { uploadToCloudinary } from '../middlewares/upload';
 
 export const getBookingsForReport = async (req: AuthRequest, res: Response) => {
   try {
+    const { branchId } = req.query;
+    const where: any = {
+      status: { notIn: ['CANCELLED', 'PENDING'] },
+    };
+
+    if (!req.user?.isSuperAdmin && req.user?.branchId) {
+      where.branchId = req.user.branchId;
+    } else if (branchId) {
+      where.branchId = String(branchId);
+    }
+
     const bookings = await prisma.booking.findMany({
-      where: {
-        status: { notIn: ['CANCELLED', 'PENDING'] },
-      },
-include: {
+      where,
+      include: {
         user: { select: { id: true, name: true, mobile: true, email: true } },
         tests: { include: { test: { include: { parameters: true } } } },
         packages: {
@@ -50,7 +59,27 @@ include: {
 
 export const getAllReports = async (req: AuthRequest, res: Response) => {
   try {
+    const { branchId, status } = req.query;
+    const where: any = {};
+
+    if (!req.user?.isSuperAdmin && req.user?.branchId) {
+      where.OR = [
+        { reportBranchId: req.user.branchId },
+        { booking: { branchId: req.user.branchId } },
+      ];
+    } else if (branchId) {
+      where.OR = [
+        { reportBranchId: String(branchId) },
+        { booking: { branchId: String(branchId) } },
+      ];
+    }
+
+    if (status) {
+      where.status = status;
+    }
+
     const reports = await prisma.report.findMany({
+      where,
       include: {
         parameters: true,
         verifiedBy: { select: { name: true } },

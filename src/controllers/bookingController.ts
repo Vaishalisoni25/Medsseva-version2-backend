@@ -120,15 +120,22 @@ export const getAvailableSlots = async (req: Request, res: Response) => {
 
 export const getAllBookings = async (req: any, res: Response) => {
   try {
-    const { mobile, id } = req.query;
+    const { mobile, id, branchId } = req.query;
     const where: any = {};
     if (req.user.role === 'EXECUTIVE') {
       where.assignedExecutiveId = req.user.id;
       where.collectionMode = 'HOME';
-    } else if (!['ADMIN', 'SUPER_ADMIN', 'PATHOLOGIST'].includes(req.user.role)) {
+    } else if (!['ADMIN', 'SUPER_ADMIN', 'PATHOLOGIST', 'LAB_DEPARTMENT', 'FRANCHISE'].includes(req.user.role)) {
       where.userId = req.user.id;
     } else {
       if (mobile) where.user = { mobile: String(mobile) };
+
+      // Automatic Branch Isolation
+      if (!req.user.isSuperAdmin && req.user.branchId) {
+        where.branchId = req.user.branchId;
+      } else if (branchId) {
+        where.branchId = String(branchId);
+      }
     }
     if (id) where.id = String(id);
 
@@ -318,10 +325,17 @@ const user = await prisma.user.findUnique({ where: { id: req.user.id } });
         },
       });
 
-      if (pricing.couponId) {
+      if (pricing.couponId && pricing.couponId !== 'REFERRAL_FREE_TEST') {
         await tx.coupon.update({ where: { id: pricing.couponId }, data: { usedCount: { increment: 1 } } });
         await tx.couponRedemption.create({
           data: { couponId: pricing.couponId, userId: user.id, bookingId: newBooking.id, discount: pricing.couponDiscount },
+        });
+      }
+
+      if (pricing.couponId === 'REFERRAL_FREE_TEST' || (user.isFirstTestFreeEligible && !user.firstTestFreeUsed)) {
+        await tx.user.update({
+          where: { id: user.id },
+          data: { firstTestFreeUsed: true },
         });
       }
 

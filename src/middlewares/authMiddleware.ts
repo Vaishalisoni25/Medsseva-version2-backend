@@ -7,7 +7,10 @@ export interface AuthRequest extends Request {
   user?: {
     id: string;
     role?: string;
-    permissions?: string[]; // e.g. ['bookings.view', 'reports.approve']
+    permissions?: string[];
+    branchId?: string | null;
+    partnerId?: string | null;
+    isSuperAdmin?: boolean;
   };
 }
 
@@ -20,14 +23,12 @@ export const authenticate = async (req: AuthRequest, res: Response, next: NextFu
 
   const token = authHeader.split(' ')[1];
 
-try {
+  try {
     const decoded = jwt.verify(token, env.jwtSecret) as { id: string; role?: string };
-    req.user = { id: decoded.id, role: decoded.role, permissions: [] };
-
-    const adminRoles = ['ADMIN', 'SUPER_ADMIN', 'PATHOLOGIST', 'LAB_DEPARTMENT'];
-    if (!decoded.role || !adminRoles.includes(decoded.role)) {
-      return next();
-    }
+    const isSuperAdmin = decoded.role === 'SUPER_ADMIN';
+    let permissions: string[] = isSuperAdmin ? ['*'] : [];
+    let branchId: string | null = null;
+    let partnerId: string | null = null;
 
     const adminUser = await prisma.adminUser.findUnique({
       where: { userId: decoded.id },
@@ -41,10 +42,21 @@ try {
     });
 
     if (adminUser && adminUser.isActive) {
-      req.user.permissions = adminUser.role.permissions.map(
+      permissions = adminUser.role.permissions.map(
         (rp) => `${rp.permission.module}.${rp.permission.action}`
       );
+      branchId = adminUser.branchId || null;
+      partnerId = adminUser.partnerId || null;
     }
+
+    req.user = {
+      id: decoded.id,
+      role: decoded.role,
+      permissions,
+      branchId,
+      partnerId,
+      isSuperAdmin,
+    };
 
     next();
   } catch (error) {
@@ -54,12 +66,18 @@ try {
 
 export const authorizeRoles = (...roles: string[]) => {
   return (req: AuthRequest, res: Response, next: NextFunction) => {
-    if (!req.user?.role) {
-      return res.status(403).json({ error: 'Forbidden: Role not assigned' });
+    if (!req.user) {
+      return res.status(401).json({ error: 'Unauthorized' });
     }
-    if (!roles.includes(req.user.role)) {
-      return res.status(403).json({ error: 'Forbidden: Insufficient privileges' });
+    if (req.user.isSuperAdmin || req.user.role === 'SUPER_ADMIN') {
+      return next();
     }
-    next();
+    if (req.user.role && roles.includes(req.user.role)) {
+      return next();
+    }
+    if (req.user.permissions && req.user.permissions.length > 0) {
+      return next();
+    }
+    return res.status(403).json({ error: 'Forbidden: Insufficient privileges' });
   };
 };

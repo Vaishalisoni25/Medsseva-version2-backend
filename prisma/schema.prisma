@@ -27,6 +27,12 @@ model User {
   otpExpiresAt        DateTime?
   otpAttempts         Int             @default(0)
   otpLastSentAt       DateTime?
+  referralCode        String?         @unique
+  referredById        String?
+  referredBy          User?           @relation("UserReferrals", fields: [referredById], references: [id])
+  referrals           User[]          @relation("UserReferrals")
+  isFirstTestFreeEligible Boolean     @default(false)
+  firstTestFreeUsed   Boolean         @default(false)
   createdAt           DateTime        @default(now())
   addresses           Address[]
   bookings            Booking[]

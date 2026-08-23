@@ -30,13 +30,26 @@ import auditRoutes from './routes/auditRoutes';
 import settingsRoutes from './routes/settingsRoutes';
 import ratingRoutes from './routes/ratingRoutes';
 import doctorRoutes from './routes/doctorRoutes';
+import referralRoutes from './routes/referralRoutes';
 import { globalLimiter } from './middlewares/rateLimiter';
 import { errorHandler } from './middlewares/errorHandler';
 import { apiRequestLogger } from './middlewares/apiLogger';
 
-const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
-  ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
-  : ['http://localhost:5173', 'http://localhost:3000'];
+const DEFAULT_ORIGINS = [
+  'http://localhost:5173',
+  'http://localhost:5174',
+  'http://localhost:5175',
+  'http://localhost:3000',
+  'http://localhost:8081',
+  'https://medsseva-admin-dashboard.vercel.app',
+];
+
+const ALLOWED_ORIGINS = [
+  ...DEFAULT_ORIGINS,
+  ...(process.env.ALLOWED_ORIGINS
+    ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
+    : []),
+];
 
 const app = express();
 
@@ -47,7 +60,13 @@ app.use(helmet());
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin) return callback(null, true);
-    if (ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
+    if (
+      ALLOWED_ORIGINS.includes(origin) ||
+      origin.endsWith('.vercel.app') ||
+      /^http:\/\/localhost:\d+$/.test(origin)
+    ) {
+      return callback(null, true);
+    }
     callback(new Error(`CORS policy: origin ${origin} not allowed`));
   },
   credentials: true,
@@ -96,6 +115,7 @@ app.use('/api/admin/audit-logs', auditRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/ratings', ratingRoutes);
 app.use('/api/doctors', doctorRoutes);
+app.use('/api/referrals', referralRoutes);
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' });

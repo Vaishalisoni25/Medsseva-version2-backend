@@ -195,7 +195,40 @@ export const validateCoupon = async (req: Request, res: Response) => {
       include: { _count: { select: { redemptions: true } } },
     });
 
-    if (!coupon) return res.status(404).json({ valid: false, error: 'Invalid coupon code' });
+    if (!coupon) {
+      const referralUser = await prisma.user.findUnique({
+        where: { referralCode: code.toUpperCase() },
+      });
+      if (referralUser) {
+        if (userId) {
+          if (referralUser.id === userId) {
+            return res.status(400).json({ valid: false, error: 'You cannot use your own referral code' });
+          }
+          const bookingCount = await prisma.booking.count({ where: { userId, status: { not: 'CANCELLED' } } });
+          const user = await prisma.user.findUnique({ where: { id: userId } });
+          if (bookingCount > 0 || (user && user.firstTestFreeUsed)) {
+            return res.status(400).json({ valid: false, error: 'Referral code discount is only valid for your first lab test' });
+          }
+        }
+        const numericCartTotal = parseFloat(cartTotal);
+        return res.json({
+          valid: true,
+          code: referralUser.referralCode || code.toUpperCase(),
+          discount: numericCartTotal,
+          finalAmount: 0,
+          description: 'First Lab Test 100% Free via Referral!',
+          coupon: {
+            id: 'REFERRAL_FREE_TEST',
+            code: referralUser.referralCode || code.toUpperCase(),
+            name: 'First Test Free Referral',
+            discountType: 'PERCENTAGE',
+            discountValue: 100,
+            description: 'Get your first lab test free with referral code',
+          },
+        });
+      }
+      return res.status(404).json({ valid: false, error: 'Invalid coupon or referral code' });
+    }
     if (!coupon.isActive) return res.status(400).json({ valid: false, error: 'This coupon is inactive' });
 
     const now = new Date();

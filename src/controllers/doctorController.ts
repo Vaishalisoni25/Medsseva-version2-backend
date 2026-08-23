@@ -2,13 +2,18 @@ import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { AuthRequest } from '../middlewares/authMiddleware';
 
-export const getDoctors = async (req: Request, res: Response) => {
+export const getDoctors = async (req: AuthRequest, res: Response) => {
   try {
     const { branchId, cityId, partnerId, specialization, search } = req.query;
 
     const where: any = { isActive: true };
 
-    if (branchId) {
+    if (!req.user?.isSuperAdmin && req.user?.branchId) {
+      where.OR = [
+        { branchId: req.user.branchId },
+        { branchId: null },
+      ];
+    } else if (branchId) {
       where.branchId = String(branchId);
     }
     if (cityId) {

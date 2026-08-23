@@ -123,6 +123,14 @@ export class PricingService {
       couponDiscount = couponResult.discount;
       resolvedCouponCode = couponResult.code;
       resolvedCouponId = couponResult.couponId;
+    } else if (userId) {
+      // Check if user is eligible for first test free via referral
+      const user = await prisma.user.findUnique({ where: { id: userId } });
+      if (user && user.isFirstTestFreeEligible && !user.firstTestFreeUsed) {
+        couponDiscount = priceAfterItemDiscount; // 100% discount on test amount
+        resolvedCouponCode = 'FIRST_TEST_FREE';
+        resolvedCouponId = 'REFERRAL_FREE_TEST';
+      }
     }
 
     const collectionCharge =
@@ -130,7 +138,7 @@ export class PricingService {
         ? (settings?.homeCollectionCharge ?? 150)
         : 0;
 
-    const taxableAmount = priceAfterItemDiscount - couponDiscount + collectionCharge;
+    const taxableAmount = Math.max(0, priceAfterItemDiscount - couponDiscount + collectionCharge);
     const gst = Math.round(taxableAmount * GST_RATE * 100) / 100;
     const platformFee = 0;
 
@@ -166,7 +174,30 @@ export class PricingService {
     const now = new Date();
     const coupon = await prisma.coupon.findUnique({ where: { code } });
 
-    if (!coupon || !coupon.isActive) {
+    if (!coupon) {
+      // Check if code is a user's referral code
+      const referralUser = await prisma.user.findUnique({ where: { referralCode: code } });
+      if (referralUser) {
+        if (userId) {
+          if (referralUser.id === userId) {
+            throw new Error('You cannot use your own referral code.');
+          }
+          const bookingCount = await prisma.booking.count({ where: { userId, status: { not: 'CANCELLED' } } });
+          const user = await prisma.user.findUnique({ where: { id: userId } });
+          if (bookingCount > 0 || (user && user.firstTestFreeUsed)) {
+            throw new Error('Referral code discount is only valid for your first lab test.');
+          }
+        }
+        return {
+          discount: cartTotal,
+          code: referralUser.referralCode || code,
+          couponId: 'REFERRAL_FREE_TEST',
+        };
+      }
+      throw new Error('Coupon or referral code is invalid.');
+    }
+
+    if (!coupon.isActive) {
       throw new Error('Coupon is invalid or inactive.');
     }
     if (coupon.startsAt && now < coupon.startsAt) {

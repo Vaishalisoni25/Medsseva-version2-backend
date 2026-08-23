@@ -1,8 +1,13 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
+import { AuthRequest } from '../middlewares/authMiddleware';
 
-export const getDashboardAnalytics = async (req: Request, res: Response) => {
+export const getDashboardAnalytics = async (req: AuthRequest, res: Response) => {
   try {
+    const { branchId } = req.query;
+    const effectiveBranchId = !req.user?.isSuperAdmin && req.user?.branchId ? req.user.branchId : (branchId as string | undefined);
+    const branchFilter = effectiveBranchId ? { branchId: effectiveBranchId } : {};
+
     const now = new Date();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const todayEnd = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
@@ -22,12 +27,13 @@ export const getDashboardAnalytics = async (req: Request, res: Response) => {
 
       // Today's bookings
       prisma.booking.findMany({
-        where: { createdAt: { gte: todayStart, lt: todayEnd } },
+        where: { createdAt: { gte: todayStart, lt: todayEnd }, ...branchFilter },
         select: { totalPaid: true, paymentStatus: true, collectionMode: true, status: true },
       }),
 
       // All bookings for general KPIs
       prisma.booking.findMany({
+        where: branchFilter,
         select: {
           id: true,
           totalPaid: true,
@@ -50,6 +56,7 @@ export const getDashboardAnalytics = async (req: Request, res: Response) => {
 
       // All reports
       prisma.report.findMany({
+        where: effectiveBranchId ? { OR: [{ reportBranchId: effectiveBranchId }, { booking: { branchId: effectiveBranchId } }] } : {},
         select: {
           status: true,
           reportedDate: true,

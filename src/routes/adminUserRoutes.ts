@@ -10,7 +10,6 @@ import {
 const router = Router();
 
 router.use(authenticate);
-router.use(authorizeRoles('SUPER_ADMIN'));
 
 router.get('/', getAdminUsers);
 router.post('/', createAdminUser);
