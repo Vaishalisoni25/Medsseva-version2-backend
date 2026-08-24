@@ -383,13 +383,16 @@ const bookingForSend = await prisma.booking.findUnique({
       where: { id: report.bookingId },
       data: { status: 'COMPLETED' },
     });
-    sendNotificationToUser(
-      released.booking.userId,
-      'Report Sent',
-      'Your report has been sent. You can download it from the Reports tab.',
-      'REPORT_SENT',
-      { bookingId: report.bookingId }
-    ).catch(console.error);
+    const targetUserId = (recipientType === 'USER' && recipientId) ? recipientId : released.booking.userId;
+    if (targetUserId) {
+      sendNotificationToUser(
+        targetUserId,
+        'Report Sent',
+        'Your report has been sent. You can download it from the Reports tab.',
+        'REPORT_SENT',
+        { bookingId: report.bookingId }
+      ).catch(console.error);
+    }
 
     res.json(released);
   } catch (error: any) {
@@ -478,10 +481,24 @@ export const getMyReports = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user?.id) return res.status(401).json({ error: 'Unauthorized' });
 
+    const currentUser = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      select: { id: true, mobile: true },
+    });
+
+    const userMobile = currentUser?.mobile || req.user.mobile;
+
     const reports = await prisma.report.findMany({
       where: {
-        status: 'RELEASED',
-        booking: { userId: req.user.id },
+        status: { in: ['RELEASED', 'APPROVED'] },
+        OR: [
+          { booking: { userId: req.user.id } },
+          { recipientId: req.user.id },
+          ...(userMobile ? [
+            { booking: { patientMobile: userMobile } },
+            { booking: { user: { mobile: userMobile } } },
+          ] : []),
+        ],
       },
       include: {
         parameters: true,
