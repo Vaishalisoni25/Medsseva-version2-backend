@@ -46,30 +46,34 @@ export const createPackage = async (req: Request, res: Response) => {
     const { 
       id, name, subtitle, category, categoryId, description, 
       price, oldPrice, discount, parametersCount, badge, 
-      testsIncluded, preparation, isActive 
+      testsIncluded, testIds, preparation, isActive 
     } = req.body;
+
+    const rawTests = testsIncluded || testIds || [];
+    const numPrice = Number(price) || 0;
+    const numOldPrice = Number(oldPrice) || numPrice;
+    const numParams = Number(parametersCount) || (Array.isArray(rawTests) ? rawTests.length : 0);
 
     const healthPackage = await prisma.healthPackage.create({
       data: {
-        id,
-        name,
+        id: id || undefined,
+        name: name || 'Health Package',
         subtitle: subtitle || '',
         category: category || 'General',
         categoryId: categoryId || 'general',
         description: description || '',
-        price: Number(price),
-        oldPrice: Number(oldPrice),
+        price: numPrice,
+        oldPrice: numOldPrice,
         discount: discount || '',
-        parametersCount: Number(parametersCount),
+        parametersCount: numParams,
         badge: badge || '',
         preparation: preparation || '',
         isActive: isActive !== undefined ? !!isActive : true,
       },
     });
 
-    if (testsIncluded && Array.isArray(testsIncluded)) {
-      // Assuming testsIncluded is an array of test IDs
-      const packageTests = testsIncluded.map(testId => ({
+    if (Array.isArray(rawTests) && rawTests.length > 0) {
+      const packageTests = rawTests.map((testId: string) => ({
         packageId: healthPackage.id,
         testId: testId,
       }));
