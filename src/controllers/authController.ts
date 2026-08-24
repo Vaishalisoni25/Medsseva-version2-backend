@@ -236,13 +236,6 @@ export const login = async (req: Request, res: Response) => {
       });
     }
 
-    const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '30d' });
-
-    let permissions: string[] = [];
-    let adminRoleName: string | null = null;
-    let adminRoleSlug: string | null = null;
-    let accessibleModules: string[] = [];
-
     const adminUser = await prisma.adminUser.findUnique({
       where: { userId: user.id },
       include: {
@@ -254,10 +247,22 @@ export const login = async (req: Request, res: Response) => {
       },
     });
 
+    const effectiveRole = user.role === 'SUPER_ADMIN'
+      ? 'SUPER_ADMIN'
+      : (adminUser ? 'ADMIN' : user.role);
+
+    const token = jwt.sign({ id: user.id, role: effectiveRole }, JWT_SECRET, { expiresIn: '30d' });
+
+    let permissions: string[] = [];
+    let adminRoleName: string | null = null;
+    let adminRoleSlug: string | null = null;
+    let accessibleModules: string[] = [];
+
     if (adminUser && adminUser.isActive) {
-      permissions = adminUser.role.permissions.map(
+      const mappedPerms = adminUser.role.permissions.map(
         (rp) => `${rp.permission.module}.${rp.permission.action}`
       );
+      permissions = mappedPerms.length > 0 ? mappedPerms : ['*'];
       adminRoleName = adminUser.role.name;
       adminRoleSlug = adminUser.role.slug;
       accessibleModules = [
@@ -267,9 +272,10 @@ export const login = async (req: Request, res: Response) => {
             .map((rp) => rp.permission.module)
         ),
       ];
-    } else if (user.role === 'SUPER_ADMIN') {
-      adminRoleName = 'Super Admin';
-      adminRoleSlug = 'super_admin';
+      if (accessibleModules.length === 0) accessibleModules = ['*'];
+    } else if (effectiveRole === 'SUPER_ADMIN' || effectiveRole === 'ADMIN') {
+      adminRoleName = effectiveRole === 'SUPER_ADMIN' ? 'Super Admin' : 'Admin';
+      adminRoleSlug = effectiveRole === 'SUPER_ADMIN' ? 'super_admin' : 'admin';
       permissions = ['*'];
       accessibleModules = ['*'];
     }
@@ -278,7 +284,7 @@ export const login = async (req: Request, res: Response) => {
       userId: user.id,
       action: 'LOGIN',
       module: 'auth',
-      performedByRole: user.role,
+      performedByRole: effectiveRole,
       ipAddress: req.ip,
       userAgent: req.headers['user-agent'] as string,
       severity: 'LOW',
@@ -301,7 +307,10 @@ export const login = async (req: Request, res: Response) => {
         name: user.name,
         mobile: user.mobile,
         email: user.email,
-        role: user.role,
+        role: effectiveRole,
+        branchId: adminUser?.branchId || null,
+        franchiseId: adminUser?.franchiseId || null,
+        userType: adminUser?.userType || null,
         referralCode: userReferralCode,
         isFirstTestFreeEligible: user.isFirstTestFreeEligible,
         firstTestFreeUsed: user.firstTestFreeUsed,
