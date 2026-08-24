@@ -48,7 +48,11 @@ export const deleteBranch = async (req: Request, res: Response) => {
 
 export const toggleBranchStatus = async (req: Request, res: Response) => {
   try {
-    const { isActive } = req.body;
+    let { isActive } = req.body || {};
+    if (typeof isActive !== 'boolean') {
+      const current = await branchService.getBranchById(req.params.id);
+      isActive = !current.isActive;
+    }
     const branch = await branchService.toggleStatus(req.params.id, isActive);
     res.json({ success: true, data: branch });
   } catch (err: any) {
