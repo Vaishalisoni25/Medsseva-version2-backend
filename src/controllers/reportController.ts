@@ -347,9 +347,6 @@ export const sendReport = async (req: AuthRequest, res: Response) => {
     if (report.status !== 'APPROVED' && report.status !== 'RELEASED') {
       return res.status(400).json({ error: 'Only finalized reports can be sent' });
     }
-    if (!report.pdfUrl) {
-      return res.status(400).json({ error: 'No finalized PDF found. Please generate the PDF before sending.' });
-    }
 
     const released = await prisma.report.update({
       where: { id },
