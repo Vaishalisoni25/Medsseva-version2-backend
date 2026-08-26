@@ -907,7 +907,7 @@ export const createWalkinBooking = async (req: any, res: Response) => {
         patientGender: gender.trim(),
         patientMobile: cleanMobile.slice(-10),
         status: 'PROCESSING',
-        paymentStatus: 'PAID',
+        paymentStatus: 'SUCCESS',
         paymentMode: 'CASH',
         collectionMode: 'LAB',
         addressId: userAddress.id,

@@ -486,7 +486,7 @@ export const getMyReports = async (req: AuthRequest, res: Response) => {
       select: { id: true, mobile: true },
     });
 
-    const userMobile = currentUser?.mobile || req.user.mobile;
+    const userMobile = currentUser?.mobile || (req.user as any)?.mobile;
 
     const reports = await prisma.report.findMany({
       where: {
