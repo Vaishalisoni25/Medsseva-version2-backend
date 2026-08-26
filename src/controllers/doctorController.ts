@@ -108,6 +108,8 @@ export const createDoctor = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ error: 'Name, Qualification, and Registration Number are required' });
     }
 
+    const targetBranchId = branchId || (!req.user?.isSuperAdmin ? req.user?.branchId : null) || null;
+
     const doctor = await (prisma as any).doctor.create({
       data: {
         name,
@@ -117,7 +119,7 @@ export const createDoctor = async (req: AuthRequest, res: Response) => {
         designation,
         photoUrl: photoUrl || null,
         signatureUrl: signatureUrl || null,
-        branchId: branchId || null,
+        branchId: targetBranchId,
         cityId: cityId || null,
         partnerId: partnerId || null,
         userId: userId || null,

@@ -6,7 +6,8 @@ export const requirePermission = (permission: string) => {
   return (req: AuthRequest, res: Response, next: NextFunction) => {
     if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
 
-    if (req.user.role === 'SUPER_ADMIN' || req.user.role === 'ADMIN' || req.user.isSuperAdmin) return next();
+    const roleUpper = (req.user.role || '').toUpperCase();
+    if (roleUpper === 'SUPER_ADMIN' || roleUpper === 'ADMIN' || req.user.isSuperAdmin) return next();
 
     const perms = req.user.permissions || [];
     if (perms.includes('*') || perms.includes(permission)) return next();

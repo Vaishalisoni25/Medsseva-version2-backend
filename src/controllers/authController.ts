@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { AuthRequest } from '../middlewares/authMiddleware';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/prisma';
 import jwt from 'jsonwebtoken';
@@ -419,6 +420,8 @@ export const createAdminUser = async (req: Request, res: Response) => {
       },
     });
 
+    const targetBranchId = branchId || (req as any).user?.branchId || null;
+
     const adminUser = await (prisma.adminUser as any).create({
       data: {
         userId: user.id,
@@ -429,7 +432,7 @@ export const createAdminUser = async (req: Request, res: Response) => {
         qualification: qualification || null,
         registrationNo: registrationNo || null,
         signatureUrl: signatureUrl || null,
-        branchId: branchId || null,
+        branchId: targetBranchId,
         partnerId: partnerId || null,
         userType: userType || 'STAFF',
         isActive: true,
@@ -473,9 +476,18 @@ export const createAdminUser = async (req: Request, res: Response) => {
   }
 };
 
-export const getAdminUsers = async (req: Request, res: Response) => {
+export const getAdminUsers = async (req: AuthRequest, res: Response) => {
   try {
+    const isSuperAdmin = req.user?.isSuperAdmin || (req.user?.role || '').toUpperCase() === 'SUPER_ADMIN';
+    const userBranchId = req.user?.branchId;
+
+    const where: any = {};
+    if (!isSuperAdmin && userBranchId) {
+      where.branchId = userBranchId;
+    }
+
     const adminUsers = await (prisma.adminUser as any).findMany({
+      where,
       include: {
         role: {
           include: {

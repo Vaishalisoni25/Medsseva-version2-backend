@@ -88,11 +88,13 @@ export const authorizeRoles = (...roles: string[]) => {
       console.warn(`\x1b[31m[AUTH 401]\x1b[0m No req.user found`);
       return res.status(401).json({ error: 'Unauthorized' });
     }
-    if (req.user.isSuperAdmin || req.user.role === 'SUPER_ADMIN' || req.user.role === 'ADMIN') {
+    const roleUpper = (req.user.role || '').toUpperCase();
+    if (req.user.isSuperAdmin || roleUpper === 'SUPER_ADMIN' || roleUpper === 'ADMIN') {
       console.log(`\x1b[32m[AUTH OK]\x1b[0m Admin/SuperAdmin bypass for ${req.method} ${req.originalUrl}`);
       return next();
     }
-    if (req.user.role && roles.includes(req.user.role)) {
+    const normalizedRoles = roles.map(r => r.toUpperCase());
+    if (roleUpper && normalizedRoles.includes(roleUpper)) {
       console.log(`\x1b[32m[AUTH OK]\x1b[0m Role match (${req.user.role}) for ${req.method} ${req.originalUrl}`);
       return next();
     }
