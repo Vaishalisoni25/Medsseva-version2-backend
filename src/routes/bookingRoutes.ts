@@ -16,6 +16,7 @@ import {
   patientReachedLab,
   updateLabStatus,
   sendBookingInvoice,
+  createWalkinBooking,
 } from '../controllers/bookingController';
 import { authenticate, authorizeRoles } from '../middlewares/authMiddleware';
 import { strictLimiter } from '../middlewares/rateLimiter';
@@ -29,6 +30,7 @@ router.get('/available-slots', getAvailableSlots);
 router.use(authenticate);
 
 router.get('/', getAllBookings);
+router.post('/walkin', authorizeRoles('ADMIN', 'SUPER_ADMIN', 'PATHOLOGIST', 'LAB_DEPARTMENT'), createWalkinBooking);
 router.post('/', strictLimiter, validateRequest(createBookingSchema), createBooking);
 router.post('/verify-payment', strictLimiter, verifyAndCreateBooking);
 router.patch('/:id/status', authorizeRoles('ADMIN', 'SUPER_ADMIN'), updateBookingStatus);

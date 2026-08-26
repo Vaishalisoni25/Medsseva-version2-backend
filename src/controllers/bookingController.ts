@@ -788,3 +788,163 @@ export const updateLabStatus = async (req: any, res: Response) => {
     res.status(500).json({ error: 'Failed to update lab status' });
   }
 };
+
+export const createWalkinBooking = async (req: any, res: Response) => {
+  try {
+    const {
+      patientName,
+      mobile,
+      address,
+      gender,
+      age,
+      reference,
+      testIds = [],
+      packageIds = [],
+      branchId,
+    } = req.body;
+
+    if (!patientName || !patientName.trim()) {
+      return res.status(400).json({ error: 'Patient Full Name is required.' });
+    }
+    if (!mobile || !mobile.trim()) {
+      return res.status(400).json({ error: 'Mobile Number is required.' });
+    }
+    const cleanMobile = mobile.trim().replace(/\D/g, '');
+    if (cleanMobile.length < 10) {
+      return res.status(400).json({ error: 'Please enter a valid 10-digit mobile number.' });
+    }
+    if (!address || !address.trim()) {
+      return res.status(400).json({ error: 'Address is required.' });
+    }
+    if (!gender || !gender.trim()) {
+      return res.status(400).json({ error: 'Gender is required.' });
+    }
+    if (age === undefined || age === null || age === '' || isNaN(Number(age)) || Number(age) <= 0) {
+      return res.status(400).json({ error: 'Valid Age is required.' });
+    }
+
+    // Resolve branch
+    let targetBranchId = branchId || (!req.user?.isSuperAdmin ? req.user?.branchId : null);
+    let branch = targetBranchId
+      ? await prisma.branch.findUnique({ where: { id: targetBranchId } })
+      : await prisma.branch.findFirst({ where: { isActive: true } });
+
+    if (!branch) {
+      branch = await prisma.branch.findFirst();
+    }
+    targetBranchId = branch?.id || null;
+
+    // Find or create User
+    let user = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { mobile: cleanMobile },
+          { mobile: `+91${cleanMobile}` },
+          { mobile: cleanMobile.slice(-10) },
+        ],
+      },
+    });
+
+    if (!user) {
+      user = await prisma.user.create({
+        data: {
+          name: patientName.trim(),
+          mobile: cleanMobile.slice(-10),
+          gender: gender.trim(),
+          role: 'USER',
+        },
+      });
+    }
+
+    // Find or create Address
+    let userAddress = await prisma.address.findFirst({
+      where: {
+        userId: user.id,
+        line1: address.trim(),
+      },
+    });
+
+    if (!userAddress) {
+      userAddress = await prisma.address.create({
+        data: {
+          userId: user.id,
+          line1: address.trim(),
+          city: branch?.city || 'Bhopal',
+          state: branch?.state || 'Madhya Pradesh',
+          pincode: branch?.pincode || '462001',
+          type: 'HOME',
+          isDefault: true,
+        },
+      });
+    }
+
+    // Unique Booking Code
+    let bookingCode = generateBookingCode();
+    while (await prisma.booking.findUnique({ where: { bookingCode } })) {
+      bookingCode = generateBookingCode();
+    }
+
+    // Calculate total price if tests/packages provided
+    let totalAmount = 0;
+    if (testIds.length > 0) {
+      const tests = await prisma.test.findMany({ where: { id: { in: testIds } } });
+      totalAmount += tests.reduce((sum, t) => sum + (t.discountedPrice || t.price || 0), 0);
+    }
+    if (packageIds.length > 0) {
+      const pkgs = await prisma.healthPackage.findMany({ where: { id: { in: packageIds } } });
+      totalAmount += pkgs.reduce((sum, p) => sum + (p.price || 0), 0);
+    }
+
+    const booking = await prisma.booking.create({
+      data: {
+        bookingCode,
+        userId: user.id,
+        scheduledDate: new Date(),
+        scheduledSlot: 'Walk-in / Immediate',
+        totalPaid: totalAmount,
+        patientName: patientName.trim(),
+        patientAge: Number(age),
+        patientGender: gender.trim(),
+        patientMobile: cleanMobile.slice(-10),
+        status: 'PROCESSING',
+        paymentStatus: 'PAID',
+        paymentMode: 'CASH',
+        collectionMode: 'LAB',
+        addressId: userAddress.id,
+        branchId: targetBranchId,
+        partnerNote: reference ? `Ref: ${reference.trim()}` : 'Walk-in Patient',
+        tests: testIds.length > 0 ? {
+          create: testIds.map((tid: string) => ({ testId: tid }))
+        } : undefined,
+        packages: packageIds.length > 0 ? {
+          create: packageIds.map((pid: string) => ({ packageId: pid }))
+        } : undefined,
+      },
+      include: {
+        user: { select: { id: true, name: true, mobile: true, email: true } },
+        tests: { include: { test: { include: { parameters: true } } } },
+        packages: {
+          include: {
+            package: {
+              include: {
+                testsIncluded: { include: { test: { include: { parameters: true } } } },
+              },
+            },
+          },
+        },
+        report: true,
+        branch: true,
+      },
+    });
+
+    const bookingWithAddress = {
+      ...booking,
+      address: userAddress,
+    };
+
+    res.status(201).json(bookingWithAddress);
+  } catch (error: any) {
+    console.error('Error creating walk-in booking:', error);
+    res.status(500).json({ error: 'Failed to create walk-in patient booking', details: error.message });
+  }
+};
