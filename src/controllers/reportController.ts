@@ -86,7 +86,7 @@ export const getAllReports = async (req: AuthRequest, res: Response) => {
         reportBranch: true,
         booking: {
           include: {
-            user: { select: { name: true, mobile: true, email: true } },
+            user: { select: { name: true, mobile: true, email: true, addresses: true } },
             tests: { include: { test: true } },
             packages: { include: { package: true } },
             branch: true,
@@ -97,7 +97,24 @@ export const getAllReports = async (req: AuthRequest, res: Response) => {
       },
       orderBy: { reportedDate: 'desc' },
     });
-    res.json(reports);
+
+    const reportsWithAddress = await Promise.all(
+      reports.map(async (r) => {
+        if (r.booking?.addressId) {
+          const address = await prisma.address.findUnique({ where: { id: r.booking.addressId } });
+          return {
+            ...r,
+            booking: {
+              ...r.booking,
+              address: address || r.booking.user?.addresses?.[0] || null,
+            },
+          };
+        }
+        return r;
+      })
+    );
+
+    res.json(reportsWithAddress);
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to fetch reports', details: error.message });
   }
@@ -105,7 +122,7 @@ export const getAllReports = async (req: AuthRequest, res: Response) => {
 export const getReportById = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
-const report = await prisma.report.findUnique({
+    const report = await prisma.report.findUnique({
       where: { id },
       include: {
         parameters: true,
@@ -113,7 +130,7 @@ const report = await prisma.report.findUnique({
         reportBranch: true,
         booking: {
           include: {
-            user: { select: { name: true, mobile: true, email: true } },
+            user: { select: { name: true, mobile: true, email: true, addresses: true } },
             tests: { include: { test: { include: { parameters: true } } } },
             packages: {
               include: {
@@ -130,7 +147,20 @@ const report = await prisma.report.findUnique({
       },
     });
     if (!report) return res.status(404).json({ error: 'Report not found' });
-    res.json(report);
+
+    let address = null;
+    if (report.booking?.addressId) {
+      address = await prisma.address.findUnique({ where: { id: report.booking.addressId } });
+    }
+    const reportWithAddress = {
+      ...report,
+      booking: report.booking ? {
+        ...report.booking,
+        address: address || report.booking.user?.addresses?.[0] || null,
+      } : null,
+    };
+
+    res.json(reportWithAddress);
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to fetch report', details: error.message });
   }
