@@ -237,9 +237,16 @@ const user = await prisma.user.findUnique({ where: { id: req.user.id } });
     let finalBranchId: string | undefined;
 
     if (safeCollectionMode === 'LAB') {
-      if (!branchId) return res.status(400).json({ error: 'branchId is required for Lab Visit bookings.' });
-      const branch = await prisma.branch.findUnique({ where: { id: branchId } });
-      if (!branch || !branch.isActive) return res.status(400).json({ error: 'Selected branch is invalid or inactive.' });
+      const targetBranchId = branchId || (req as any).user?.branchId;
+      let branch = targetBranchId
+        ? await prisma.branch.findUnique({ where: { id: targetBranchId } })
+        : await prisma.branch.findFirst({ where: { isActive: true } });
+
+      if (!branch) {
+        branch = await prisma.branch.findFirst();
+      }
+
+      if (!branch) return res.status(400).json({ error: 'No diagnostic branch found in the system.' });
       finalBranchId = branch.id;
       const centerAddr =
         (await prisma.address.findFirst({ where: { userId: user.id, type: 'CENTER', line1: branch.line1 } })) ||
