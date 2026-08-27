@@ -30,6 +30,7 @@ import auditRoutes from './routes/auditRoutes';
 import settingsRoutes from './routes/settingsRoutes';
 import ratingRoutes from './routes/ratingRoutes';
 import doctorRoutes from './routes/doctorRoutes';
+import staffRoutes from './routes/staffRoutes';
 import referralRoutes from './routes/referralRoutes';
 import { globalLimiter } from './middlewares/rateLimiter';
 import { errorHandler } from './middlewares/errorHandler';
@@ -115,6 +116,7 @@ app.use('/api/admin/audit-logs', auditRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/ratings', ratingRoutes);
 app.use('/api/doctors', doctorRoutes);
+app.use('/api/staff', staffRoutes);
 app.use('/api/referrals', referralRoutes);
 
 app.get('/api/health', (_req, res) => {
