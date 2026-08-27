@@ -459,7 +459,7 @@ export const createAdminUser = async (req: Request, res: Response) => {
             registrationNo: registrationNo || 'REG-' + Date.now().toString().slice(-6),
             designation: designation || 'Consultant Pathologist',
             signatureUrl: signatureUrl || null,
-            branchId: branchId || null,
+            branchId: targetBranchId,
             partnerId: partnerId || null,
             isActive: true,
           },
@@ -478,12 +478,15 @@ export const createAdminUser = async (req: Request, res: Response) => {
 
 export const getAdminUsers = async (req: AuthRequest, res: Response) => {
   try {
+    const { branchId } = req.query;
     const isSuperAdmin = req.user?.isSuperAdmin || (req.user?.role || '').toUpperCase() === 'SUPER_ADMIN';
     const userBranchId = req.user?.branchId;
 
     const where: any = {};
     if (!isSuperAdmin && userBranchId) {
       where.branchId = userBranchId;
+    } else if (branchId) {
+      where.branchId = String(branchId);
     }
 
     const adminUsers = await (prisma.adminUser as any).findMany({
