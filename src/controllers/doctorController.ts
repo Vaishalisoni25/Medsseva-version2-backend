@@ -6,13 +6,13 @@ export const getDoctors = async (req: AuthRequest, res: Response) => {
   try {
     const { branchId, cityId, partnerId, specialization, search } = req.query;
 
+    const isSuperAdmin = req.user?.isSuperAdmin || (req.user?.role || '').toUpperCase() === 'SUPER_ADMIN';
+    const userBranchId = req.user?.branchId;
+
     const where: any = { isActive: true };
 
-    if (!req.user?.isSuperAdmin && req.user?.branchId) {
-      where.OR = [
-        { branchId: req.user.branchId },
-        { branchId: null },
-      ];
+    if (!isSuperAdmin && userBranchId) {
+      where.branchId = userBranchId;
     } else if (branchId) {
       where.branchId = String(branchId);
     }

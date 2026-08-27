@@ -10,13 +10,14 @@ import { authenticate } from '../middlewares/authMiddleware';
 
 const router = Router();
 
-// Public/Authenticated list of doctors for report dropdowns and booking
+router.use(authenticate);
+
 router.get('/', getDoctors);
 router.get('/:id', getDoctorById);
 
 // Admin / Partner protected actions
-router.post('/', authenticate, createDoctor);
-router.put('/:id', authenticate, updateDoctor);
-router.delete('/:id', authenticate, deleteDoctor);
+router.post('/', createDoctor);
+router.put('/:id', updateDoctor);
+router.delete('/:id', deleteDoctor);
 
 export default router;

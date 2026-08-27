@@ -869,9 +869,9 @@ export const createWalkinBooking = async (req: any, res: Response) => {
         data: {
           userId: user.id,
           line1: address.trim(),
-          city: branch?.city || 'Bhopal',
-          state: branch?.state || 'Madhya Pradesh',
-          pincode: branch?.pincode || '462001',
+          city: branch?.city || '',
+          state: branch?.state || '',
+          pincode: branch?.pincode || '',
           type: 'HOME',
           isDefault: true,
         },
