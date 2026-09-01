@@ -1,0 +1,69 @@
+# Dependencies
+node_modules/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Environment Variables
+.env
+.env.*
+!.env.example
+
+# Build Output
+dist/
+build/
+coverage/
+
+# Runtime Files
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# Temporary Files
+tmp/
+temp/
+.cache/
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+!.vscode/extensions.json
+.idea/
+
+# TypeScript
+*.tsbuildinfo
+
+# Database
+*.sqlite
+*.sqlite3
+
+# Prisma
+prisma/dev.db
+prisma/dev.db-journal
+
+# Firebase / Service Account Keys
+firebase-adminsdk*.json
+serviceAccountKey.json
+serviceAccountKey*.json
+*-service-account.json
+service-account*.json
+
+# Uploads (generated at runtime)
+uploads/
+public/uploads/
+
+# Test Coverage
+.nyc_output/
+
+# Misc
+*.local
