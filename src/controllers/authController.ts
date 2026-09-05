@@ -13,6 +13,97 @@ import { generateUniqueReferralCode } from '../utils/referral.utils';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-medsseva-key';
 
+export const registerDoctor = async (req: Request, res: Response) => {
+  try {
+    console.log('[AUTH] >>> POST /api/auth/register/doctor received with body:', {
+      name: req.body?.name,
+      mobile: req.body?.mobile,
+      email: req.body?.email,
+      qualification: req.body?.qualification,
+      registrationNo: req.body?.registrationNo,
+      specialization: req.body?.specialization,
+      designation: req.body?.designation,
+    });
+
+    const { name, email, mobile, password, qualification, registrationNo, specialization, designation } = req.body;
+
+    if (!name || !mobile || !password || !qualification || !registrationNo) {
+      console.warn('[AUTH] Missing required fields in doctor registration');
+      return res.status(400).json({ error: 'Name, Mobile, Password, Qualification, and Registration Number are required' });
+    }
+
+    const cleanMobile = mobile.trim();
+    const existingUser = await prisma.user.findFirst({
+      where: { OR: [{ mobile: cleanMobile }, ...(email ? [{ email: email.trim() }] : [])] }
+    });
+
+    if (existingUser) {
+      console.warn('[AUTH] Doctor registration conflict - mobile or email exists:', { cleanMobile, email });
+      return res.status(400).json({
+        error: existingUser.mobile === cleanMobile
+          ? 'Mobile number already registered. Please login instead.'
+          : 'Email already in use. Try a different email.'
+      });
+    }
+
+    const cleanRegNo = registrationNo.trim();
+    const existingDoctor = await (prisma as any).doctor.findFirst({
+      where: { registrationNo: { equals: cleanRegNo, mode: 'insensitive' } }
+    });
+
+    if (existingDoctor) {
+      console.warn('[AUTH] Doctor registration conflict - Registration No exists:', cleanRegNo);
+      return res.status(400).json({ error: 'A doctor with this Medical Council Registration Number already exists.' });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const referralCode = await generateUniqueReferralCode();
+    const docCode = `DOC-${cleanMobile.slice(-4)}${Math.floor(1000 + Math.random() * 9000)}`;
+
+    const user = await prisma.user.create({
+      data: {
+        name: name.trim(),
+        email: email ? email.trim() : undefined,
+        mobile: cleanMobile,
+        password: hashedPassword,
+        role: 'DOCTOR' as any,
+        referralCode,
+      }
+    });
+
+    const doctor = await (prisma as any).doctor.create({
+      data: {
+        userId: user.id,
+        name: name.trim(),
+        code: docCode,
+        loginId: cleanMobile,
+        password: hashedPassword,
+        qualification: qualification.trim(),
+        registrationNo: cleanRegNo,
+        specialization: specialization ? specialization.trim() : 'General Medicine / Pathology',
+        designation: designation ? designation.trim() : 'Consulting Doctor',
+        isActive: true,
+      }
+    });
+
+    console.log('[AUTH] <<< Doctor registration successful:', { doctorId: doctor.id, userId: user.id, code: doctor.code });
+
+    res.status(201).json({
+      message: 'Doctor registration submitted successfully. Awaiting verification.',
+      pendingApproval: true,
+      doctor: {
+        id: doctor.id,
+        name: doctor.name,
+        code: doctor.code,
+        registrationNo: doctor.registrationNo,
+      }
+    });
+  } catch (error: any) {
+    console.error('[AUTH] !!! Doctor registration error:', error);
+    res.status(500).json({ error: 'Failed to submit registration. Try again.', details: error.message });
+  }
+};
+
 export const registerPartner = async (req: Request, res: Response) => {
   try {
     const { name, email, mobile, password, labName, role: partnerRole, cityId, branchId, address, latitude, longitude } = req.body;

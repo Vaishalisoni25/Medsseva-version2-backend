@@ -1,8 +1,8 @@
 const BREVO_API_URL = 'https://api.brevo.com/v3/smtp/email';
 
 const getSender = () => ({
-  name: (process.env.BREVO_SENDER_NAME || '').trim() || 'vaishalisoni',
-  email: (process.env.BREVO_SENDER_EMAIL || '').trim() || 'vaishalisoni02004@gmail.com',
+  name: (process.env.BREVO_SENDER_NAME || '').trim() || 'MedsSeva',
+  email: (process.env.BREVO_SENDER_EMAIL || '').trim() || 'medssevaofficial@gmail.com',
 });
 
 function buildOtpEmailHtml(userName: string, otp: string): string {
