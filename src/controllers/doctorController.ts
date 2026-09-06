@@ -4,12 +4,20 @@ import { AuthRequest } from '../middlewares/authMiddleware';
 
 export const getDoctors = async (req: AuthRequest, res: Response) => {
   try {
-    const { branchId, cityId, partnerId, specialization, search } = req.query;
+    const { branchId, cityId, partnerId, specialization, search, status } = req.query;
 
     const isSuperAdmin = req.user?.isSuperAdmin || (req.user?.role || '').toUpperCase() === 'SUPER_ADMIN';
+    const isAdmin = isSuperAdmin || (req.user?.role || '').toUpperCase() === 'ADMIN';
     const userBranchId = req.user?.branchId;
 
-    const where: any = { isActive: true };
+    const where: any = {};
+    if (status === 'active') {
+      where.isActive = true;
+    } else if (status === 'pending' || status === 'inactive') {
+      where.isActive = false;
+    } else if (!status && !isAdmin) {
+      where.isActive = true;
+    }
 
     if (!isSuperAdmin && userBranchId) {
       where.branchId = userBranchId;
@@ -189,5 +197,103 @@ export const deleteDoctor = async (req: AuthRequest, res: Response) => {
   } catch (error: any) {
     console.error('Error deleting doctor:', error);
     res.status(500).json({ error: 'Failed to delete doctor', details: error.message });
+  }
+};
+
+export const createDoctorSamplePickupRequest = async (req: AuthRequest, res: Response) => {
+  try {
+    const doctorUserId = req.user?.id;
+    if (!doctorUserId) {
+      return res.status(401).json({ error: 'Unauthorized Doctor request' });
+    }
+    const { patientName, patientMobile, patientAge, patientGender, testIds, address, latitude, longitude, notes } = req.body;
+
+    if (!patientName || !patientMobile) {
+      return res.status(400).json({ error: 'Patient name and mobile are required for sample pickup request' });
+    }
+
+    const bookingCode = `DOC-PU-${Date.now().toString().slice(-6)}`;
+
+    // Create Home Collection booking entering main distribution engine (WAITING_FOR_PARTNER)
+    const booking = await prisma.booking.create({
+      data: {
+        bookingCode,
+        userId: doctorUserId,
+        patientName,
+        patientMobile,
+        patientAge: patientAge ? Number(patientAge) : null,
+        patientGender: patientGender || null,
+        scheduledDate: new Date(),
+        scheduledSlot: 'ASAP Pickup',
+        totalPaid: 0,
+        collectionMode: 'HOME',
+        status: 'WAITING_FOR_PARTNER',
+        partnerNote: notes ? `Doctor Pickup Request: ${notes}` : 'Doctor Clinic Sample Pickup Request',
+        addressId: address || 'Doctor Clinic Location',
+      }
+    });
+
+    res.status(201).json({
+      message: 'Sample pickup request created successfully and broadcast to nearby collection partners',
+      booking
+    });
+  } catch (error: any) {
+    console.error('Error creating doctor sample pickup request:', error);
+    res.status(500).json({ error: 'Failed to create sample pickup request', details: error.message });
+  }
+};
+
+export const doctorDirectSampleHandover = async (req: AuthRequest, res: Response) => {
+  try {
+    const doctorUserId = req.user?.id;
+    if (!doctorUserId) {
+      return res.status(401).json({ error: 'Unauthorized Doctor request' });
+    }
+    const { targetBranchId, patientName, patientMobile, sampleType, notes } = req.body;
+
+    if (!targetBranchId || !patientName) {
+      return res.status(400).json({ error: 'Target branch ID and patient name are required' });
+    }
+
+    const bookingCode = `DOC-HO-${Date.now().toString().slice(-6)}`;
+
+    const booking = await prisma.booking.create({
+      data: {
+        bookingCode,
+        userId: doctorUserId,
+        patientName,
+        patientMobile: patientMobile || null,
+        scheduledDate: new Date(),
+        scheduledSlot: 'Direct Handover',
+        totalPaid: 0,
+        collectionMode: 'LAB',
+        branchId: targetBranchId,
+        status: 'DELIVERED_TO_LAB',
+        partnerNote: notes ? `Doctor Direct Handover: ${notes}` : 'Direct Doctor Sample Handover',
+        addressId: 'Direct Lab Handover',
+      }
+    });
+
+    const accessionNumber = `SMP-HO-${bookingCode.slice(-6)}`;
+    const sample = await prisma.sample.create({
+      data: {
+        bookingId: booking.id,
+        accessionNumber,
+        sampleType: sampleType || 'Blood / Serum',
+        receivedById: doctorUserId,
+        notes: notes || 'Handed over directly by Doctor',
+        status: 'RECEIVED',
+        branchId: targetBranchId,
+      }
+    });
+
+    res.status(201).json({
+      message: 'Sample handed over to target lab branch successfully',
+      booking,
+      sample
+    });
+  } catch (error: any) {
+    console.error('Error in doctorDirectSampleHandover:', error);
+    res.status(500).json({ error: 'Failed to complete direct sample handover', details: error.message });
   }
 };

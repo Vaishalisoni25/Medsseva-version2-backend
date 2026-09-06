@@ -274,6 +274,40 @@ export const sendBroadcastToAllUsers = async (
   await sendNotificationToMultipleUsers(userIds, title, body, type, data);
 };
 
+export const triggerApprovalNotification = async (
+  userId: string,
+  roleName: string,
+  email?: string | null
+): Promise<void> => {
+  const title = 'Account Approved!';
+  const body = `Congratulations! Your MedsSeva ${roleName} account has been verified and approved by Admin. You can now access your operational dashboard.`;
+
+  try {
+    await prisma.notification.create({
+      data: {
+        userId,
+        title,
+        body,
+        type: 'BROADCAST',
+        isRead: false,
+        deepLink: 'medssevaapp://',
+      },
+    });
+  } catch (err) {
+    console.warn('In-app notification creation error:', err);
+  }
+
+  // Attempt push notification
+  try {
+    const tokens = await prisma.deviceToken.findMany({ where: { userId } });
+    for (const tokenRecord of tokens) {
+      await sendFcmToToken(tokenRecord.token, title, body, 'BROADCAST', {}).catch(() => {});
+    }
+  } catch (err) {
+    console.warn('Push notification send error:', err);
+  }
+};
+
 export const retryFailedNotifications = async (): Promise<void> => {
   const failed = await prisma.notificationLog.findMany({
     where: { status: 'FAILED', retryCount: { lt: 3 } },

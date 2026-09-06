@@ -2,6 +2,8 @@ import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { sendNotificationToUser } from '../services/notification.service';
 import { paymentService } from '../services/payment.service';
+import { isWithinServiceRadius } from '../utils/geo.utils';
+
 export const getPartnerBookings = async (req: any, res: Response) => {
   try {
     const partner = await prisma.pathologyPartner.findUnique({
@@ -57,25 +59,51 @@ export const getPartnerBookings = async (req: any, res: Response) => {
   }
 };
 
-// New: broadcast notifications - all WAITING_FOR_PARTNER bookings this partner hasn't rejected
+// broadcast notifications - WAITING_FOR_PARTNER bookings filtered by service radius & rejection status
 export const getPartnerNotifications = async (req: any, res: Response) => {
   try {
+    let collectorLat: number | null = null;
+    let collectorLon: number | null = null;
+    let radiusKm = 15;
+    let partnerId: string | null = null;
+    let isApproved = false;
+
     const partner = await prisma.pathologyPartner.findUnique({
       where: { userId: req.user.id }
     });
-    if (!partner) return res.status(404).json({ error: 'Partner profile not found.' });
-    if (partner.approvalStatus !== 'APPROVED') {
-      return res.status(403).json({ error: 'Partner not approved yet.' });
-    }
-    if (!partner.isAvailable) {
-      return res.json([]); // offline partners see nothing
+
+    if (partner) {
+      if (partner.approvalStatus !== 'APPROVED') {
+        return res.status(403).json({ error: 'Partner not approved yet.' });
+      }
+      if (!partner.isAvailable) {
+        return res.json([]); // offline partners see nothing
+      }
+      collectorLat = partner.latitude;
+      collectorLon = partner.longitude;
+      radiusKm = (partner as any).radiusKm || 15;
+      partnerId = partner.id;
+      isApproved = true;
+    } else {
+      const adminUser = await prisma.adminUser.findFirst({
+        where: { userId: req.user.id }
+      });
+      if (adminUser && adminUser.userType === 'STAFF' && adminUser.isActive) {
+        isApproved = true;
+      }
+      const user = await prisma.user.findUnique({ where: { id: req.user.id } });
+      if (user && ((user.role as string) === 'EXECUTIVE' || (user.role as string) === 'PHLEBOTOMIST')) {
+        isApproved = true;
+      }
+
+      if (!isApproved) {
+        return res.status(403).json({ error: 'Collector profile not found or not active.' });
+      }
     }
 
-    const rejectedIds = await prisma.bookingRejection.findMany({
-      where: { partnerId: partner.id },
-      select: { bookingId: true },
-    });
-    const excludedIds = rejectedIds.map(r => r.bookingId);
+    const excludedIds = partnerId
+      ? (await prisma.bookingRejection.findMany({ where: { partnerId }, select: { bookingId: true } })).map(r => r.bookingId)
+      : [];
 
     const bookings = await prisma.booking.findMany({
       where: {
@@ -90,8 +118,16 @@ export const getPartnerNotifications = async (req: any, res: Response) => {
       orderBy: { createdAt: 'asc' },
     });
 
-    const formatted = await Promise.all(bookings.map(async (b) => {
+    const formatted = (await Promise.all(bookings.map(async (b) => {
       const address = await prisma.address.findUnique({ where: { id: b.addressId } });
+      const addrLat = address ? (address as any).latitude : null;
+      const addrLon = address ? (address as any).longitude : null;
+
+      if (addrLat && addrLon && collectorLat && collectorLon) {
+        const withinRadius = isWithinServiceRadius(addrLat, addrLon, collectorLat, collectorLon, radiusKm);
+        if (!withinRadius) return null;
+      }
+
       return {
         id: b.id,
         bookingCode: b.bookingCode,
@@ -102,10 +138,12 @@ export const getPartnerNotifications = async (req: any, res: Response) => {
         totalPaid: b.totalPaid,
         status: b.status,
         collectionAddress: address ? `${address.line1}, ${address.city}` : null,
+        latitude: addrLat,
+        longitude: addrLon,
         tests: b.tests.map(t => ({ name: t.test.name })),
         packages: b.packages.map(p => ({ name: p.package.name })),
       };
-    }));
+    }))).filter(Boolean);
 
     res.json(formatted);
   } catch (error: any) {
@@ -117,50 +155,71 @@ export const acceptBooking = async (req: any, res: Response) => {
   try {
     const { id } = req.params;
     const partner = await prisma.pathologyPartner.findUnique({ where: { userId: req.user.id } });
-    if (!partner) return res.status(404).json({ error: 'Partner profile not found.' });
-    if (partner.approvalStatus !== 'APPROVED') {
+    const user = await prisma.user.findUnique({ where: { id: req.user.id } });
+
+    if (!partner && (!user || (user.role as string) !== 'EXECUTIVE')) {
+      return res.status(404).json({ error: 'Collector profile not found.' });
+    }
+
+    if (partner && partner.approvalStatus !== 'APPROVED') {
       return res.status(403).json({ error: 'Partner not approved.' });
     }
 
-  // Check current booking state first
     const existing = await prisma.booking.findUnique({ where: { id } });
     if (!existing) return res.status(404).json({ error: 'Booking not found.' });
 
-    // Case 1: Already accepted by THIS partner - idempotent, return current state
-    if (existing.status === 'ACCEPTED' && existing.assignedPartnerId === partner.id) {
+    if (existing.addressId) {
+      const address = await prisma.address.findUnique({ where: { id: existing.addressId } });
+      const addrLat = address ? (address as any).latitude : null;
+      const addrLon = address ? (address as any).longitude : null;
+      const collectorLat = partner ? partner.latitude : null;
+      const collectorLon = partner ? partner.longitude : null;
+      const radiusKm = partner ? ((partner as any).radiusKm || 15) : 15;
+
+      if (addrLat && addrLon && collectorLat && collectorLon) {
+        const withinRadius = isWithinServiceRadius(addrLat, addrLon, collectorLat, collectorLon, radiusKm);
+        if (!withinRadius) {
+          return res.status(403).json({ error: 'Booking address is outside your service radius.' });
+        }
+      }
+    }
+
+    if (existing.status === 'ACCEPTED' && ((partner && existing.assignedPartnerId === partner.id) || existing.assignedExecutiveId === req.user.id)) {
       const confirmedBooking = await prisma.booking.findUnique({ where: { id } });
       return res.json(confirmedBooking);
     }
 
-    // Case 2: Atomic claim - only succeeds if still WAITING_FOR_PARTNER.
-    // Sets status directly to ACCEPTED so user sees "Partner Assigned" immediately
-    // with no intermediate ASSIGNED lag step on the partner app.
+    const updateData: any = {
+      status: 'ACCEPTED',
+      partnerAcceptedAt: new Date(),
+    };
+    if (partner) {
+      updateData.assignedPartnerId = partner.id;
+      updateData.partnerAssignedAt = new Date();
+    } else {
+      updateData.assignedExecutiveId = req.user.id;
+    }
+
     const updated = await prisma.booking.updateMany({
       where: { id, status: 'WAITING_FOR_PARTNER' },
-      data: {
-        status: 'ACCEPTED',
-        assignedPartnerId: partner.id,
-        partnerAssignedAt: new Date(),
-        partnerAcceptedAt: new Date(),
-      },
+      data: updateData,
     });
 
     if (updated.count === 0) {
-      return res.status(409).json({ error: 'Booking already accepted by another partner.' });
+      return res.status(409).json({ error: 'Booking already accepted by another collector.' });
     }
 
     await prisma.bookingStatusLog.create({
       data: {
         bookingId: id,
         status: 'ACCEPTED',
-        note: `Accepted by partner ${partner.id}`,
+        note: partner ? `Accepted by partner ${partner.id}` : `Accepted by executive ${req.user.id}`,
         updatedBy: req.user.id,
       }
     });
 
     const booking = await prisma.booking.findUnique({ where: { id } });
 
-    // Auto-generate OTP for pay-at-doorstep bookings only
     if (booking && booking.paymentStatus !== 'SUCCESS' && !booking.collectionOtp) {
       const otp = Math.floor(1000 + Math.random() * 9000).toString();
       await prisma.booking.update({
@@ -169,19 +228,7 @@ export const acceptBooking = async (req: any, res: Response) => {
       });
     }
 
-const updatedBooking = await prisma.booking.findUnique({
-      where: { id },
-      include: {
-        assignedPartner: {
-          include: {
-            user: {
-              select: { name: true, mobile: true, avatarUrl: true }
-            }
-          }
-        }
-      }
-    });
-
+    const updatedBooking = await prisma.booking.findUnique({ where: { id } });
     if (updatedBooking) {
       sendNotificationToUser(updatedBooking.userId, 'Booking Accepted', 'Your booking has been accepted.', 'BOOKING_ACCEPTED', { bookingId: id }).catch(console.error);
     }
@@ -1109,5 +1156,37 @@ export const getPartnerStats = async (req: any, res: Response) => {
     });
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to fetch stats', details: error.message });
+  }
+};
+
+export const assignPartnerStaff = async (req: any, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { executiveId } = req.body;
+    const partner = await prisma.pathologyPartner.findUnique({ where: { userId: req.user.id } });
+    if (!partner) return res.status(404).json({ error: 'Partner profile not found.' });
+
+    const booking = await prisma.booking.findUnique({ where: { id } });
+    if (!booking) return res.status(404).json({ error: 'Booking not found.' });
+    if (booking.assignedPartnerId !== partner.id) {
+      return res.status(403).json({ error: 'Booking is not assigned to your Pathology Partner.' });
+    }
+
+    const targetAdminUser = await prisma.adminUser.findFirst({
+      where: { userId: executiveId }
+    });
+
+    if (!targetAdminUser || targetAdminUser.partnerId !== partner.id) {
+      return res.status(403).json({ error: 'Selected staff member does not belong to your Pathology Partner.' });
+    }
+
+    const updated = await prisma.booking.update({
+      where: { id },
+      data: { assignedExecutiveId: executiveId }
+    });
+
+    res.json(updated);
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to assign staff', details: error.message });
   }
 };

@@ -22,16 +22,18 @@ import {
   selectDeliveryBranch,
   confirmBranchDelivery,
   getDeliveryBranches,
+  assignPartnerStaff,
 } from '../controllers/partnerController';
 
 const router = Router();
 
-// All routes require PATHOLOGY_PARTNER role
-router.use(authenticate, authorizeRoles('PATHOLOGY_PARTNER'));
+// Allow PATHOLOGY_PARTNER and EXECUTIVE roles
+router.use(authenticate, authorizeRoles('PATHOLOGY_PARTNER', 'EXECUTIVE'));
 
 router.get('/notifications', getPartnerNotifications);
 router.get('/bookings', getPartnerBookings);
 router.patch('/bookings/:id/accept', acceptBooking);
+router.patch('/bookings/:id/assign-staff', assignPartnerStaff);
 router.patch('/bookings/:id/reject', rejectBooking);
 router.patch('/bookings/:id/status', updateBookingStatus);
 router.post('/bookings/:id/collect-cash', collectCash);

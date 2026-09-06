@@ -32,6 +32,7 @@ import ratingRoutes from './routes/ratingRoutes';
 import doctorRoutes from './routes/doctorRoutes';
 import staffRoutes from './routes/staffRoutes';
 import referralRoutes from './routes/referralRoutes';
+import collectionPartnerRoutes from './routes/collectionPartnerRoutes';
 import { globalLimiter } from './middlewares/rateLimiter';
 import { errorHandler } from './middlewares/errorHandler';
 import { apiRequestLogger } from './middlewares/apiLogger';
@@ -118,6 +119,7 @@ app.use('/api/ratings', ratingRoutes);
 app.use('/api/doctors', doctorRoutes);
 app.use('/api/staff', staffRoutes);
 app.use('/api/referrals', referralRoutes);
+app.use('/api/collection-partners', collectionPartnerRoutes);
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' });

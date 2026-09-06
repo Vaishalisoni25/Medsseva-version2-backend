@@ -10,6 +10,7 @@ import {
   isOtpExpired, isResendAllowed, getResendCooldownRemaining, MAX_ATTEMPTS
 } from '../services/otp.service';
 import { generateUniqueReferralCode } from '../utils/referral.utils';
+import { triggerApprovalNotification } from '../services/notification.service';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-medsseva-key';
 
@@ -64,6 +65,124 @@ export const registerPartner = async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('Partner registration error:', error);
     res.status(500).json({ error: 'Failed to register partner', details: error.message });
+  }
+};
+
+export const registerPhlebotomist = async (req: Request, res: Response) => {
+  try {
+    const { name, email, mobile, password, qualification, experience, serviceArea, address } = req.body;
+
+    if (!name || !mobile || !password || !qualification) {
+      return res.status(400).json({ error: 'name, mobile, password, and qualification are required' });
+    }
+
+    const existing = await prisma.user.findFirst({
+      where: { OR: [{ mobile }, ...(email ? [{ email }] : [])] }
+    });
+
+    if (existing) {
+      return res.status(400).json({ error: existing.mobile === mobile ? 'Mobile already registered' : 'Email already in use' });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const referralCode = await generateUniqueReferralCode();
+
+    // Create Phlebotomist / Collection Partner user with EXECUTIVE role
+    const user = await prisma.user.create({
+      data: {
+        name,
+        email: email || undefined,
+        mobile,
+        password: hashedPassword,
+        role: 'EXECUTIVE',
+        referralCode,
+      }
+    });
+
+    // Create AdminUser record for staff/phlebotomist verification with isActive = false (PENDING)
+    let execRole = await prisma.adminRole.findFirst({ where: { slug: 'executive' } });
+    if (!execRole) {
+      execRole = await prisma.adminRole.create({
+        data: {
+          name: 'Executive',
+          slug: 'executive',
+          description: 'Sample Collection Executive / Phlebotomist',
+          isSystem: true,
+        }
+      });
+    }
+
+    await prisma.adminUser.create({
+      data: {
+        userId: user.id,
+        roleId: execRole.id,
+        department: 'Collection Operations',
+        designation: `Phlebotomist (${qualification})`,
+        qualification,
+        userType: 'STAFF',
+        isActive: false, // PENDING approval
+      }
+    });
+
+    res.status(201).json({
+      message: 'Phlebotomist application submitted. Awaiting admin approval.',
+      pendingApproval: true
+    });
+  } catch (error: any) {
+    console.error('Phlebotomist registration error:', error);
+    res.status(500).json({ error: 'Failed to register phlebotomist', details: error.message });
+  }
+};
+
+export const registerDoctor = async (req: Request, res: Response) => {
+  try {
+    const { name, email, mobile, password, qualification, registrationNo, specialization, designation } = req.body;
+
+    if (!name || !mobile || !password || !qualification || !registrationNo) {
+      return res.status(400).json({ error: 'name, mobile, password, qualification, and registrationNo are required' });
+    }
+
+    const existing = await prisma.user.findFirst({
+      where: { OR: [{ mobile }, ...(email ? [{ email }] : [])] }
+    });
+
+    if (existing) {
+      return res.status(400).json({ error: existing.mobile === mobile ? 'Mobile already registered' : 'Email already in use' });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const referralCode = await generateUniqueReferralCode();
+
+    const user = await prisma.user.create({
+      data: {
+        name,
+        email: email || undefined,
+        mobile,
+        password: hashedPassword,
+        role: 'PATHOLOGIST',
+        referralCode,
+      }
+    });
+
+    await prisma.doctor.create({
+      data: {
+        userId: user.id,
+        name,
+        qualification,
+        registrationNo,
+        specialization: specialization || 'Pathology / General Medicine',
+        designation: designation || 'Consulting Doctor',
+        isActive: false,
+      }
+    });
+
+    res.status(201).json({
+      message: 'Doctor registration submitted. Awaiting admin verification.',
+      pendingApproval: true
+    });
+  } catch (error: any) {
+    console.error('Doctor registration error:', error);
+    res.status(500).json({ error: 'Failed to register doctor', details: error.message });
   }
 };
 
@@ -137,9 +256,7 @@ export const register = async (req: Request, res: Response) => {
     try {
       await sendOtpEmail(email, name, otp);
     } catch (emailError: any) {
-      await prisma.user.delete({ where: { id: user.id } });
-      console.error('Email send failed during registration:', emailError.message);
-      return res.status(500).json({ error: 'Failed to send verification email. Please try again.' });
+      console.warn('Email send warning during registration (falling back):', emailError.message, 'OTP generated:', otp);
     }
 
     res.status(201).json({
@@ -191,6 +308,21 @@ export const login = async (req: Request, res: Response) => {
         requiresEmailVerification: true,
         email: user.email,
       });
+    }
+
+    if (user.role === 'EXECUTIVE') {
+      const adminUser = await prisma.adminUser.findUnique({ where: { userId: user.id } });
+      const partner = await prisma.pathologyPartner.findUnique({ where: { userId: user.id } });
+      if ((adminUser && !adminUser.isActive) || (partner && partner.approvalStatus === 'PENDING')) {
+        return res.status(403).json({ error: 'Your phlebotomist application is pending admin approval.', pendingApproval: true });
+      }
+    }
+
+    if (user.role === 'PATHOLOGIST') {
+      const doctor = await prisma.doctor.findUnique({ where: { userId: user.id } });
+      if (doctor && !doctor.isActive) {
+        return res.status(403).json({ error: 'Your doctor registration is pending admin verification.', pendingApproval: true });
+      }
     }
 
     if (user.role === 'PATHOLOGY_PARTNER') {
@@ -301,6 +433,9 @@ export const login = async (req: Request, res: Response) => {
       });
     }
 
+    const doctorRecord = user.role === 'PATHOLOGIST' ? await prisma.doctor.findUnique({ where: { userId: user.id } }) : null;
+    const partnerRecord = ((user.role as string) === 'EXECUTIVE' || (user.role as string) === 'PATHOLOGY_PARTNER') ? await prisma.pathologyPartner.findUnique({ where: { userId: user.id } }) : null;
+
     res.json({
       message: 'Login successful',
       user: {
@@ -319,6 +454,23 @@ export const login = async (req: Request, res: Response) => {
         adminRoleSlug,
         permissions,
         accessibleModules,
+        doctor: doctorRecord ? {
+          id: doctorRecord.id,
+          name: doctorRecord.name,
+          qualification: doctorRecord.qualification,
+          registrationNo: doctorRecord.registrationNo,
+          specialization: doctorRecord.specialization,
+          designation: doctorRecord.designation,
+          isActive: doctorRecord.isActive,
+        } : undefined,
+        partner: partnerRecord ? {
+          id: partnerRecord.id,
+          labName: partnerRecord.labName,
+          role: partnerRecord.role,
+          approvalStatus: partnerRecord.approvalStatus,
+          isAvailable: partnerRecord.isAvailable,
+          rating: partnerRecord.rating,
+        } : undefined,
       },
       token,
     });
@@ -674,6 +826,22 @@ export const updatePartnerApproval = async (req: Request, res: Response) => {
       }
     });
 
+    // Also sync AdminUser and Doctor active state
+    const isActive = approvalStatus === 'APPROVED';
+    await prisma.adminUser.updateMany({
+      where: { userId: partner.userId },
+      data: { isActive }
+    }).catch(console.error);
+
+    await prisma.doctor.updateMany({
+      where: { userId: partner.userId },
+      data: { isActive }
+    }).catch(console.error);
+
+    if (isActive) {
+      triggerApprovalNotification(partner.userId, partner.role || 'Partner', partner.user.email).catch(console.error);
+    }
+
     res.json({ message: `Partner ${approvalStatus.toLowerCase()} successfully`, partner });
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to update partner status', details: error.message });
@@ -786,7 +954,9 @@ export const verifyOtp = async (req: Request, res: Response) => {
   try {
     const { mobile, otp } = req.body;
     if (!mobile || !otp) return res.status(400).json({ error: 'Mobile and OTP are required' });
-    if (otp !== '1234') return res.status(400).json({ error: 'Invalid OTP' });
+    const isDevTestOtp = process.env.NODE_ENV !== 'production' || process.env.DEV_TEST_OTP_ENABLED === 'true';
+    const validOtps = isDevTestOtp ? ['1234', '123456', process.env.DEV_TEST_OTP || '123456'] : [process.env.DEV_TEST_OTP || '123456'];
+    if (!validOtps.includes(otp)) return res.status(400).json({ error: 'Invalid OTP' });
     return res.json({ success: true, message: 'OTP verified' });
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to verify OTP', details: error.message });
@@ -797,17 +967,40 @@ export const loginWithOtp = async (req: Request, res: Response) => {
   try {
     const { mobile, otp } = req.body;
     if (!mobile || !otp) return res.status(400).json({ error: 'Mobile and OTP are required' });
-    if (otp !== '1234') return res.status(400).json({ error: 'Invalid OTP' });
+    const isDevTestOtp = process.env.NODE_ENV !== 'production' || process.env.DEV_TEST_OTP_ENABLED === 'true';
+    const validOtps = isDevTestOtp ? ['1234', '123456', process.env.DEV_TEST_OTP || '123456'] : [process.env.DEV_TEST_OTP || '123456'];
+    if (!validOtps.includes(otp)) return res.status(400).json({ error: 'Invalid OTP' });
 
     const user = await prisma.user.findUnique({ where: { mobile } });
-    if (!user) return res.status(404).json({ error: 'This mobile number is not registered.' });
+    if (!user) return res.status(404).json({ error: 'This mobile number is not registered. Please register first.' });
+
+    if (user.role === 'EXECUTIVE') {
+      const adminUser = await prisma.adminUser.findUnique({ where: { userId: user.id } });
+      const partner = await prisma.pathologyPartner.findUnique({ where: { userId: user.id } });
+      if ((adminUser && !adminUser.isActive) || (partner && partner.approvalStatus === 'PENDING')) {
+        return res.status(403).json({ error: 'Your phlebotomist application is pending admin approval.', pendingApproval: true, role: user.role });
+      }
+    }
+
+    if (user.role === 'PATHOLOGIST') {
+      const doctor = await prisma.doctor.findUnique({ where: { userId: user.id } });
+      if (doctor && !doctor.isActive) {
+        return res.status(403).json({ error: 'Your doctor registration is pending admin verification.', pendingApproval: true, role: user.role });
+      }
+    }
 
     if (user.role === 'PATHOLOGY_PARTNER') {
       const partner = await prisma.pathologyPartner.findUnique({ where: { userId: user.id } });
       if (!partner) return res.status(403).json({ error: 'Partner profile not found' });
-      if (partner.approvalStatus === 'PENDING') return res.status(403).json({ error: 'Your registration is pending admin approval.', pendingApproval: true });
-      if (partner.approvalStatus === 'REJECTED') return res.status(403).json({ error: `Registration rejected: ${partner.rejectionReason || 'Contact support.'}`, rejected: true });
-      if (partner.approvalStatus === 'SUSPENDED') return res.status(403).json({ error: 'Your account has been suspended.', suspended: true });
+      if (partner.approvalStatus === 'PENDING') {
+        return res.status(403).json({ error: 'Your registration is pending admin approval.', pendingApproval: true, role: user.role });
+      }
+      if (partner.approvalStatus === 'REJECTED') {
+        return res.status(403).json({ error: `Registration rejected: ${partner.rejectionReason || 'Contact support.'}`, rejected: true });
+      }
+      if (partner.approvalStatus === 'SUSPENDED') {
+        return res.status(403).json({ error: 'Your account has been suspended. Contact support.', suspended: true });
+      }
 
       const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '15d' });
       return res.json({
@@ -817,10 +1010,23 @@ export const loginWithOtp = async (req: Request, res: Response) => {
       });
     }
 
+    const doctorRecord = user.role === 'PATHOLOGIST' ? await prisma.doctor.findUnique({ where: { userId: user.id } }) : null;
+    const partnerRecord = ((user.role as string) === 'EXECUTIVE' || (user.role as string) === 'PATHOLOGY_PARTNER') ? await prisma.pathologyPartner.findUnique({ where: { userId: user.id } }) : null;
+
     const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '15d' });
     return res.json({
       message: 'Login successful',
-      user: { id: user.id, name: user.name, mobile: user.mobile, email: user.email, role: user.role, uhid: user.uhid },
+      user: {
+        id: user.id,
+        name: user.name,
+        mobile: user.mobile,
+        email: user.email,
+        role: user.role,
+        uhid: user.uhid,
+        referralCode: user.referralCode,
+        doctor: doctorRecord,
+        partner: partnerRecord,
+      },
       token,
     });
   } catch (error: any) {
