@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import {
   register, registerPartner, registerDoctor, registerPhlebotomist, login, getAllUsers, checkMobile,
+  createPatientUser, updatePatientUser, deletePatientUser,
   getPartners, updatePartnerApproval, getAvailablePartners, getMe,
   sendOtp, verifyOtp, resetPassword, loginWithOtp,
   sendEmailOtp, verifyEmailOtp,
@@ -34,6 +35,10 @@ router.get('/me', authenticate, getMe);
 
 // Admin only
 router.get('/users', authenticate, authorizeRoles('ADMIN', 'SUPER_ADMIN'), getAllUsers);
+router.post('/users', authenticate, authorizeRoles('ADMIN', 'SUPER_ADMIN'), createPatientUser);
+router.put('/users/:id', authenticate, authorizeRoles('ADMIN', 'SUPER_ADMIN'), updatePatientUser);
+router.patch('/users/:id', authenticate, authorizeRoles('ADMIN', 'SUPER_ADMIN'), updatePatientUser);
+router.delete('/users/:id', authenticate, authorizeRoles('SUPER_ADMIN'), deletePatientUser);
 router.get('/partners', authenticate, authorizeRoles('ADMIN', 'SUPER_ADMIN'), getPartners);
 router.patch('/partners/:id/approval', authenticate, authorizeRoles('ADMIN', 'SUPER_ADMIN'), updatePartnerApproval);
 router.get('/partners/available', authenticate, authorizeRoles('ADMIN', 'SUPER_ADMIN'), getAvailablePartners);

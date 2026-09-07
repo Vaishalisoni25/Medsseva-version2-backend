@@ -33,13 +33,18 @@ export const registerDoctor = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Name, Mobile, Password, Qualification, and Registration Number are required' });
     }
 
-    const cleanMobile = mobile.trim();
+    const cleanMobile = String(mobile || '').trim().replace(/\D/g, '').slice(-10);
+    if (cleanMobile.length !== 10) {
+      return res.status(400).json({ error: 'Please enter a valid 10-digit mobile number' });
+    }
+    const cleanEmail = email ? email.trim().toLowerCase() : undefined;
+
     const existingUser = await prisma.user.findFirst({
-      where: { OR: [{ mobile: cleanMobile }, ...(email ? [{ email: email.trim() }] : [])] }
+      where: { OR: [{ mobile: cleanMobile }, ...(cleanEmail ? [{ email: cleanEmail }] : [])] }
     });
 
     if (existingUser) {
-      console.warn('[AUTH] Doctor registration conflict - mobile or email exists:', { cleanMobile, email });
+      console.warn('[AUTH] Doctor registration conflict - mobile or email exists:', { cleanMobile, email: cleanEmail });
       return res.status(400).json({
         error: existingUser.mobile === cleanMobile
           ? 'Mobile number already registered. Please login instead.'
@@ -64,7 +69,7 @@ export const registerDoctor = async (req: Request, res: Response) => {
     const user = await prisma.user.create({
       data: {
         name: name.trim(),
-        email: email ? email.trim() : undefined,
+        email: cleanEmail,
         mobile: cleanMobile,
         password: hashedPassword,
         role: 'DOCTOR' as any,
@@ -83,7 +88,7 @@ export const registerDoctor = async (req: Request, res: Response) => {
         registrationNo: cleanRegNo,
         specialization: specialization ? specialization.trim() : 'General Medicine / Pathology',
         designation: designation ? designation.trim() : 'Consulting Doctor',
-        isActive: true,
+        isActive: false,
       }
     });
 
@@ -163,16 +168,18 @@ export const registerPhlebotomist = async (req: Request, res: Response) => {
   try {
     const { name, email, mobile, password, qualification, experience, serviceArea, address } = req.body;
 
-    if (!name || !mobile || !password || !qualification) {
-      return res.status(400).json({ error: 'name, mobile, password, and qualification are required' });
+    const cleanMobile = String(mobile || '').trim().replace(/\D/g, '').slice(-10);
+    if (cleanMobile.length !== 10) {
+      return res.status(400).json({ error: 'Please enter a valid 10-digit mobile number' });
     }
+    const cleanEmail = email ? email.trim().toLowerCase() : undefined;
 
     const existing = await prisma.user.findFirst({
-      where: { OR: [{ mobile }, ...(email ? [{ email }] : [])] }
+      where: { OR: [{ mobile: cleanMobile }, ...(cleanEmail ? [{ email: cleanEmail }] : [])] }
     });
 
     if (existing) {
-      return res.status(400).json({ error: existing.mobile === mobile ? 'Mobile already registered' : 'Email already in use' });
+      return res.status(400).json({ error: existing.mobile === cleanMobile ? 'Mobile already registered' : 'Email already in use' });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -181,9 +188,9 @@ export const registerPhlebotomist = async (req: Request, res: Response) => {
     // Create Phlebotomist / Collection Partner user with EXECUTIVE role
     const user = await prisma.user.create({
       data: {
-        name,
-        email: email || undefined,
-        mobile,
+        name: name.trim(),
+        email: cleanEmail,
+        mobile: cleanMobile,
         password: hashedPassword,
         role: 'EXECUTIVE',
         referralCode,
@@ -203,17 +210,35 @@ export const registerPhlebotomist = async (req: Request, res: Response) => {
       });
     }
 
+    const qualStr = qualification ? qualification.trim() : '';
+    const expStr = experience ? experience.trim() : '';
+    const designationStr = expStr ? `Phlebotomist (${qualStr} - ${expStr})` : `Phlebotomist (${qualStr})`;
+
     await prisma.adminUser.create({
       data: {
         userId: user.id,
         roleId: execRole.id,
-        department: 'Collection Operations',
-        designation: `Phlebotomist (${qualification})`,
-        qualification,
+        department: serviceArea ? serviceArea.trim() : 'Collection Operations',
+        designation: designationStr,
+        qualification: qualStr,
         userType: 'STAFF',
         isActive: false, // PENDING approval
       }
     });
+
+    if (address) {
+      await prisma.address.create({
+        data: {
+          userId: user.id,
+          type: 'WORK',
+          line1: address.trim(),
+          city: serviceArea ? serviceArea.trim() : 'Delhi NCR',
+          state: 'Delhi',
+          pincode: '110001',
+          isDefault: true,
+        }
+      }).catch(err => console.warn('Phlebotomist address creation non-fatal:', err.message));
+    }
 
     res.status(201).json({
       message: 'Phlebotomist application submitted. Awaiting admin approval.',
@@ -357,7 +382,7 @@ export const login = async (req: Request, res: Response) => {
       }
     }
 
-    if (user.role === 'PATHOLOGIST') {
+    if (user.role === 'PATHOLOGIST' || (user.role as string) === 'DOCTOR') {
       const doctor = await prisma.doctor.findUnique({ where: { userId: user.id } });
       if (doctor && !doctor.isActive) {
         return res.status(403).json({ error: 'Your doctor registration is pending admin verification.', pendingApproval: true });
@@ -472,7 +497,7 @@ export const login = async (req: Request, res: Response) => {
       });
     }
 
-    const doctorRecord = user.role === 'PATHOLOGIST' ? await prisma.doctor.findUnique({ where: { userId: user.id } }) : null;
+    const doctorRecord = (user.role === 'PATHOLOGIST' || (user.role as string) === 'DOCTOR') ? await prisma.doctor.findUnique({ where: { userId: user.id } }) : null;
     const partnerRecord = ((user.role as string) === 'EXECUTIVE' || (user.role as string) === 'PATHOLOGY_PARTNER') ? await prisma.pathologyPartner.findUnique({ where: { userId: user.id } }) : null;
 
     res.json({
@@ -1021,7 +1046,7 @@ export const loginWithOtp = async (req: Request, res: Response) => {
       }
     }
 
-    if (user.role === 'PATHOLOGIST') {
+    if (user.role === 'PATHOLOGIST' || (user.role as string) === 'DOCTOR') {
       const doctor = await prisma.doctor.findUnique({ where: { userId: user.id } });
       if (doctor && !doctor.isActive) {
         return res.status(403).json({ error: 'Your doctor registration is pending admin verification.', pendingApproval: true, role: user.role });
@@ -1049,7 +1074,7 @@ export const loginWithOtp = async (req: Request, res: Response) => {
       });
     }
 
-    const doctorRecord = user.role === 'PATHOLOGIST' ? await prisma.doctor.findUnique({ where: { userId: user.id } }) : null;
+    const doctorRecord = (user.role === 'PATHOLOGIST' || (user.role as string) === 'DOCTOR') ? await prisma.doctor.findUnique({ where: { userId: user.id } }) : null;
     const partnerRecord = ((user.role as string) === 'EXECUTIVE' || (user.role as string) === 'PATHOLOGY_PARTNER') ? await prisma.pathologyPartner.findUnique({ where: { userId: user.id } }) : null;
 
     const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '15d' });
@@ -1294,16 +1319,289 @@ export const resetPassword = async (req: Request, res: Response) => {
   }
 };
 
-export const getAllUsers = async (req: Request, res: Response) => {
+export const getAllUsers = async (req: any, res: Response) => {
   try {
+    const { role, branchId, search } = req.query;
+    const currentUser = req.user;
+    const isSuperAdmin = currentUser?.isSuperAdmin || (currentUser?.role || '').toUpperCase() === 'SUPER_ADMIN';
+    const effectiveBranchId = !isSuperAdmin && currentUser?.branchId ? currentUser.branchId : branchId;
+
+    const where: any = {};
+    if (role) {
+      where.role = role;
+    }
+
+    if (search) {
+      const q = String(search).trim();
+      where.OR = [
+        { name: { contains: q, mode: 'insensitive' } },
+        { mobile: { contains: q, mode: 'insensitive' } },
+        { email: { contains: q, mode: 'insensitive' } },
+        { uhid: { contains: q, mode: 'insensitive' } },
+      ];
+    }
+
+    if (effectiveBranchId) {
+      where.bookings = {
+        some: {
+          branchId: String(effectiveBranchId),
+        },
+      };
+    }
+
     const users = await prisma.user.findMany({
+      where,
       orderBy: { createdAt: 'desc' },
-      include: { familyMembers: true },
+      include: {
+        familyMembers: true,
+        addresses: true,
+        bookings: {
+          select: {
+            id: true,
+            bookingCode: true,
+            branchId: true,
+            branch: { select: { id: true, name: true, city: true, code: true } },
+            status: true,
+            createdAt: true,
+            scheduledDate: true,
+            totalPaid: true,
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 10,
+        },
+      },
     });
     res.json(users);
   } catch (error: any) {
     console.error('Error fetching registered users:', error);
     res.status(500).json({ error: 'Failed to fetch registered users', details: error.message });
+  }
+};
+
+export const createPatientUser = async (req: any, res: Response) => {
+  try {
+    const { name, mobile, email, gender, dob, bloodGroup, altMobile, address, branchId } = req.body;
+
+    if (!name || !mobile) {
+      return res.status(400).json({ error: 'Name and mobile number are required' });
+    }
+
+    const cleanMobile = String(mobile).trim().replace(/\D/g, '').slice(-10);
+    if (!/^[6-9]\d{9}$/.test(cleanMobile)) {
+      return res.status(400).json({ error: 'Enter a valid 10-digit Indian mobile number' });
+    }
+
+    const existingUser = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { mobile: cleanMobile },
+          ...(email ? [{ email: String(email).trim() }] : []),
+        ],
+      },
+    });
+
+    if (existingUser) {
+      return res.status(400).json({
+        error: existingUser.mobile === cleanMobile
+          ? 'Patient with this mobile number already exists.'
+          : 'Email already in use by another account.',
+      });
+    }
+
+    let uhid = '';
+    let isUniqueUhid = false;
+    while (!isUniqueUhid) {
+      const part1 = Math.floor(1000 + Math.random() * 9000);
+      const part2 = Math.floor(1000 + Math.random() * 9000);
+      uhid = `${part1}-${part2}`;
+      const conflict = await prisma.user.findUnique({ where: { uhid } });
+      if (!conflict) isUniqueUhid = true;
+    }
+
+    const referralCode = await generateUniqueReferralCode();
+
+    const user = await prisma.user.create({
+      data: {
+        name: String(name).trim(),
+        mobile: cleanMobile,
+        email: email ? String(email).trim() : undefined,
+        gender: gender || null,
+        dob: dob || null,
+        bloodGroup: bloodGroup || null,
+        altMobile: altMobile ? String(altMobile).trim() : null,
+        uhid,
+        referralCode,
+        role: 'USER',
+      },
+    });
+
+    if (address && String(address).trim()) {
+      let branchCity = '';
+      let branchState = '';
+      if (branchId) {
+        const branch = await prisma.branch.findUnique({ where: { id: branchId } });
+        if (branch) {
+          branchCity = branch.city || '';
+          branchState = branch.state || '';
+        }
+      }
+
+      await prisma.address.create({
+        data: {
+          userId: user.id,
+          line1: String(address).trim(),
+          city: branchCity || 'City',
+          state: branchState || 'State',
+          pincode: '000000',
+          type: 'HOME',
+          isDefault: true,
+        },
+      });
+    }
+
+    const fullUser = await prisma.user.findUnique({
+      where: { id: user.id },
+      include: {
+        familyMembers: true,
+        addresses: true,
+        bookings: {
+          include: { branch: true },
+        },
+      },
+    });
+
+    res.status(201).json({ message: 'Patient registered successfully', user: fullUser });
+  } catch (error: any) {
+    console.error('Error creating patient:', error);
+    res.status(500).json({ error: 'Failed to create patient', details: error.message });
+  }
+};
+
+export const updatePatientUser = async (req: any, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { name, email, mobile, gender, dob, bloodGroup, altMobile, address } = req.body;
+
+    const user = await prisma.user.findUnique({ where: { id } });
+    if (!user) {
+      return res.status(404).json({ error: 'Patient not found' });
+    }
+
+    const updateData: any = {};
+    if (name) updateData.name = String(name).trim();
+    if (gender !== undefined) updateData.gender = gender || null;
+    if (dob !== undefined) updateData.dob = dob || null;
+    if (bloodGroup !== undefined) updateData.bloodGroup = bloodGroup || null;
+    if (altMobile !== undefined) updateData.altMobile = altMobile ? String(altMobile).trim() : null;
+
+    if (mobile) {
+      const cleanMobile = String(mobile).trim().replace(/\D/g, '').slice(-10);
+      if (!/^[6-9]\d{9}$/.test(cleanMobile)) {
+        return res.status(400).json({ error: 'Enter a valid 10-digit mobile number' });
+      }
+      if (cleanMobile !== user.mobile) {
+        const existing = await prisma.user.findUnique({ where: { mobile: cleanMobile } });
+        if (existing) {
+          return res.status(400).json({ error: 'Mobile number already used by another user' });
+        }
+        updateData.mobile = cleanMobile;
+      }
+    }
+
+    if (email !== undefined) {
+      const cleanEmail = email ? String(email).trim() : null;
+      if (cleanEmail && cleanEmail !== user.email) {
+        const existing = await prisma.user.findUnique({ where: { email: cleanEmail } });
+        if (existing) {
+          return res.status(400).json({ error: 'Email already used by another user' });
+        }
+        updateData.email = cleanEmail;
+      } else if (!cleanEmail) {
+        updateData.email = null;
+      }
+    }
+
+    const updated = await prisma.user.update({
+      where: { id },
+      data: updateData,
+      include: {
+        familyMembers: true,
+        addresses: true,
+        bookings: {
+          select: {
+            id: true,
+            bookingCode: true,
+            branchId: true,
+            branch: { select: { id: true, name: true, city: true, code: true } },
+            status: true,
+            createdAt: true,
+            totalPaid: true,
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 10,
+        },
+      },
+    });
+
+    if (address && String(address).trim()) {
+      const existingAddr = await prisma.address.findFirst({ where: { userId: id } });
+      if (existingAddr) {
+        await prisma.address.update({
+          where: { id: existingAddr.id },
+          data: { line1: String(address).trim() },
+        });
+      } else {
+        await prisma.address.create({
+          data: {
+            userId: id,
+            line1: String(address).trim(),
+            city: 'City',
+            state: 'State',
+            pincode: '000000',
+            type: 'HOME',
+            isDefault: true,
+          },
+        });
+      }
+    }
+
+    res.json({ message: 'Patient updated successfully', user: updated });
+  } catch (error: any) {
+    console.error('Error updating patient:', error);
+    res.status(500).json({ error: 'Failed to update patient', details: error.message });
+  }
+};
+
+export const deletePatientUser = async (req: any, res: Response) => {
+  try {
+    const { id } = req.params;
+    const isSuperAdmin = req.user?.isSuperAdmin || (req.user?.role || '').toUpperCase() === 'SUPER_ADMIN';
+
+    if (!isSuperAdmin) {
+      return res.status(403).json({ error: 'Only Super Admin can delete a patient record' });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id },
+      include: { bookings: { select: { id: true, status: true } } },
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: 'Patient not found' });
+    }
+
+    const activeBookings = user.bookings.filter(b => !['COMPLETED', 'CANCELLED', 'REJECTED'].includes(b.status));
+    if (activeBookings.length > 0) {
+      return res.status(400).json({
+        error: `Cannot delete patient with ${activeBookings.length} ongoing test booking(s). Please complete or cancel bookings first.`
+      });
+    }
+
+    await prisma.user.delete({ where: { id } });
+    res.json({ message: 'Patient deleted successfully' });
+  } catch (error: any) {
+    console.error('Error deleting patient:', error);
+    res.status(500).json({ error: 'Failed to delete patient', details: error.message });
   }
 };
 
