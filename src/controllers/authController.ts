@@ -112,18 +112,51 @@ export const registerDoctor = async (req: Request, res: Response) => {
 
 export const registerPartner = async (req: Request, res: Response) => {
   try {
-    const { name, email, mobile, password, labName, role: partnerRole, cityId, branchId, address, latitude, longitude } = req.body;
+    const {
+      name, email, mobile, password,
+      labName, ownerName, role: partnerRole, cityId, city, state, pincode, branchId, address, preferredServiceArea,
+      latitude, longitude, documents
+    } = req.body;
 
     if (!name || !mobile || !password || !labName || !partnerRole) {
       return res.status(400).json({ error: 'name, mobile, password, labName, and role are required' });
     }
 
+    const cleanMobile = String(mobile || '').trim().replace(/\D/g, '').slice(-10);
+    if (cleanMobile.length !== 10) {
+      return res.status(400).json({ error: 'Please enter a valid 10-digit mobile number' });
+    }
+    const cleanEmail = email ? String(email).trim().toLowerCase() : undefined;
+
     const existing = await prisma.user.findFirst({
-      where: { OR: [{ mobile }, ...(email ? [{ email }] : [])] }
+      where: { OR: [{ mobile: cleanMobile }, ...(cleanEmail ? [{ email: cleanEmail }] : [])] }
     });
 
     if (existing) {
-      return res.status(400).json({ error: existing.mobile === mobile ? 'Mobile already registered' : 'Email already in use' });
+      return res.status(400).json({ error: existing.mobile === cleanMobile ? 'Mobile already registered' : 'Email already in use' });
+    }
+
+    // Backend validation of required onboarding documents
+    const REQUIRED_DOCS = [
+      'MEDICAL_CEA_REGISTRATION',
+      'BMW_LICENCE',
+      'PATHOLOGIST_QUALIFICATION',
+      'REGISTRATION_CERTIFICATE',
+      'PAN_CARD'
+    ];
+
+    let documentList: Array<{ documentType: string; fileName: string; fileUrl: string; mimeType?: string; fileSize?: number }> = [];
+    if (Array.isArray(documents)) {
+      documentList = documents;
+    }
+
+    const uploadedDocTypes = new Set(documentList.map(d => d.documentType));
+    const missingDocs = REQUIRED_DOCS.filter(dt => !uploadedDocTypes.has(dt));
+    if (missingDocs.length > 0) {
+      return res.status(400).json({
+        error: `Missing required onboarding documents: ${missingDocs.join(', ')}`,
+        missingDocuments: missingDocs
+      });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -132,31 +165,53 @@ export const registerPartner = async (req: Request, res: Response) => {
     const user = await prisma.user.create({
       data: {
         name,
-        email: email || undefined,
-        mobile,
+        email: cleanEmail,
+        mobile: cleanMobile,
         password: hashedPassword,
         role: 'PATHOLOGY_PARTNER',
         referralCode,
       }
     });
 
-    await prisma.pathologyPartner.create({
+    const partner = await prisma.pathologyPartner.create({
       data: {
         userId: user.id,
         labName,
+        ownerName: ownerName || name,
         role: partnerRole,
         cityId: cityId || null,
+        city: city || null,
+        state: state || null,
+        pincode: pincode || null,
         branchId: branchId || null,
         address: address || null,
+        preferredServiceArea: preferredServiceArea || null,
         latitude: latitude || null,
         longitude: longitude || null,
         approvalStatus: 'PENDING'
       }
     });
 
+    if (documentList.length > 0) {
+      await prisma.partnerDocument.createMany({
+        data: documentList.map(doc => ({
+          partnerId: partner.id,
+          documentType: doc.documentType as any,
+          fileName: doc.fileName || `${doc.documentType}.pdf`,
+          fileUrl: doc.fileUrl,
+          mimeType: doc.mimeType || 'application/pdf',
+          fileSize: doc.fileSize || 0,
+          status: 'UPLOADED',
+        })),
+        skipDuplicates: true
+      });
+    }
+
     res.status(201).json({
-      message: 'Partner registration submitted. Awaiting admin approval.',
-      pendingApproval: true
+      message: 'Partner onboarding application submitted. Awaiting admin approval.',
+      pendingApproval: true,
+      partnerId: partner.id,
+      userId: user.id
     });
   } catch (error: any) {
     console.error('Partner registration error:', error);
@@ -855,7 +910,8 @@ export const getPartners = async (req: Request, res: Response) => {
     const partners = await prisma.pathologyPartner.findMany({
       where: status ? { approvalStatus: status as any } : undefined,
       include: {
-        user: { select: { id: true, name: true, email: true, mobile: true, createdAt: true } }
+        user: { select: { id: true, name: true, email: true, mobile: true, createdAt: true } },
+        documents: true,
       },
       orderBy: { createdAt: 'desc' }
     });
@@ -865,12 +921,29 @@ export const getPartners = async (req: Request, res: Response) => {
   }
 };
 
+export const getPartnerDetails = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const partner = await prisma.pathologyPartner.findUnique({
+      where: { id },
+      include: {
+        user: { select: { id: true, name: true, email: true, mobile: true, createdAt: true } },
+        documents: true,
+      }
+    });
+    if (!partner) return res.status(404).json({ error: 'Partner not found' });
+    res.json(partner);
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to fetch partner details', details: error.message });
+  }
+};
+
 export const updatePartnerApproval = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { approvalStatus, rejectionReason } = req.body;
+    const { approvalStatus, rejectionReason, correctionReason } = req.body;
 
-    const validStatuses = ['APPROVED', 'REJECTED', 'SUSPENDED', 'PENDING'];
+    const validStatuses = ['APPROVED', 'REJECTED', 'SUSPENDED', 'PENDING', 'BLOCKED', 'CORRECTION_REQUIRED'];
     if (!validStatuses.includes(approvalStatus)) {
       return res.status(400).json({ error: 'Invalid approval status' });
     }
@@ -878,19 +951,23 @@ export const updatePartnerApproval = async (req: Request, res: Response) => {
     if (approvalStatus === 'REJECTED' && !rejectionReason) {
       return res.status(400).json({ error: 'Rejection reason is required' });
     }
+    if (approvalStatus === 'CORRECTION_REQUIRED' && !correctionReason) {
+      return res.status(400).json({ error: 'Correction reason is required' });
+    }
 
     const partner = await prisma.pathologyPartner.update({
       where: { id },
       data: {
-        approvalStatus,
-        rejectionReason: approvalStatus === 'REJECTED' ? rejectionReason : null
+        approvalStatus: approvalStatus as any,
+        rejectionReason: approvalStatus === 'REJECTED' ? rejectionReason : null,
+        correctionReason: approvalStatus === 'CORRECTION_REQUIRED' ? correctionReason : null,
       },
       include: {
-        user: { select: { id: true, name: true, email: true, mobile: true } }
+        user: { select: { id: true, name: true, email: true, mobile: true } },
+        documents: true,
       }
     });
 
-    // Also sync AdminUser and Doctor active state
     const isActive = approvalStatus === 'APPROVED';
     await prisma.adminUser.updateMany({
       where: { userId: partner.userId },
@@ -906,9 +983,9 @@ export const updatePartnerApproval = async (req: Request, res: Response) => {
       triggerApprovalNotification(partner.userId, partner.role || 'Partner', partner.user.email).catch(console.error);
     }
 
-    res.json({ message: `Partner ${approvalStatus.toLowerCase()} successfully`, partner });
+    res.json({ message: `Partner status updated to ${approvalStatus}`, partner });
   } catch (error: any) {
-    res.status(500).json({ error: 'Failed to update partner status', details: error.message });
+    res.status(500).json({ error: 'Failed to update partner approval', details: error.message });
   }
 };
 
