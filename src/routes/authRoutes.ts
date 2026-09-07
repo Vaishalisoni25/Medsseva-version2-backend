@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import {
-  register, registerPartner, registerDoctor, login, getAllUsers, checkMobile,
+  register, registerPartner, registerDoctor, registerPhlebotomist, login, getAllUsers, checkMobile,
   getPartners, updatePartnerApproval, getAvailablePartners, getMe,
   sendOtp, verifyOtp, resetPassword, loginWithOtp,
   sendEmailOtp, verifyEmailOtp,
@@ -16,6 +16,7 @@ router.get('/check-mobile', checkMobile);
 router.post('/register', register);
 router.post('/register/partner', registerPartner);
 router.post('/register/doctor', registerDoctor);
+router.post('/register/phlebotomist', registerPhlebotomist);
 router.post('/login', login);
 router.post('/doctor/login', doctorLogin);
 router.post('/partner/login', partnerLogin);
