@@ -47,7 +47,8 @@ export const getCollectionPartners = async (req: Request, res: Response) => {
       include: {
         adminUser: {
           include: { branch: true }
-        }
+        },
+        pathologyPartner: true
       },
       orderBy: { createdAt: 'desc' }
     });
@@ -65,9 +66,15 @@ export const getCollectionPartners = async (req: Request, res: Response) => {
       const walletBalance = totalCommissionEarned;
 
       const adminUser = e.adminUser;
-      const isApproved = adminUser ? adminUser.isActive : false;
-      const currentStatus = isApproved ? 'APPROVED' : 'PENDING';
+      const partner = e.pathologyPartner;
+      let currentStatus = 'PENDING';
+      if (partner?.approvalStatus) {
+        currentStatus = partner.approvalStatus;
+      } else if (adminUser?.isActive) {
+        currentStatus = 'APPROVED';
+      }
       const branch = adminUser?.branch || null;
+      const isAvailable = currentStatus === 'APPROVED' && (partner ? partner.isAvailable : true);
 
       return {
         id: e.id,
@@ -78,7 +85,7 @@ export const getCollectionPartners = async (req: Request, res: Response) => {
         avatarUrl: e.avatarUrl || null,
         registrationDate: e.createdAt.toISOString(),
         status: currentStatus,
-        isAvailable: true,
+        isAvailable,
         partnerCode: `PHLEBO-${e.id.slice(0, 5).toUpperCase()}`,
         labName: `${e.name} (Collection Partner)`,
         role: 'PHLEBOTOMIST',
@@ -124,7 +131,10 @@ export const getCollectionPartnerDetails = async (req: Request, res: Response) =
 
     const user = await prisma.user.findFirst({
       where: { id, role: 'EXECUTIVE' },
-      include: { adminUser: { include: { branch: true } } }
+      include: {
+        adminUser: { include: { branch: true } },
+        pathologyPartner: true
+      }
     });
 
     if (!user) {
@@ -177,9 +187,21 @@ export const getCollectionPartnerDetails = async (req: Request, res: Response) =
     });
 
     const adminUser = user.adminUser;
+    const partner = user.pathologyPartner;
+    let currentStatus = 'PENDING';
+    if (partner?.approvalStatus) {
+      currentStatus = partner.approvalStatus;
+    } else if (adminUser?.isActive) {
+      currentStatus = 'APPROVED';
+    }
     const branch = adminUser?.branch || null;
+    const isAvailable = currentStatus === 'APPROVED' && (partner ? partner.isAvailable : true);
 
-    res.json({
+    const totalSamples = collectionsHistory.length;
+    const totalTestValue = collectionsHistory.reduce((sum, c) => sum + (c.testAmount || 0), 0);
+    const totalCommissionEarned = collectionsHistory.reduce((sum, c) => sum + (c.commissionAmount || 0), 0);
+
+    const partnerData = {
       id: user.id,
       userId: user.id,
       name: user.name,
@@ -187,8 +209,8 @@ export const getCollectionPartnerDetails = async (req: Request, res: Response) =
       email: user.email || '',
       avatarUrl: user.avatarUrl || null,
       registrationDate: user.createdAt.toISOString(),
-      status: adminUser?.isActive ? 'APPROVED' : 'PENDING',
-      isAvailable: true,
+      status: currentStatus,
+      isAvailable,
       partnerCode: `PHLEBO-${user.id.slice(0, 5).toUpperCase()}`,
       labName: `${user.name} (Collection Partner)`,
       role: 'PHLEBOTOMIST',
@@ -196,6 +218,18 @@ export const getCollectionPartnerDetails = async (req: Request, res: Response) =
       assignedLab: branch ? { id: branch.id, name: branch.name, city: branch.city } : null,
       commissionRate: 15,
       paymentCycle: 'WEEKLY',
+      totalSamplesCollected: totalSamples,
+      totalTestValue,
+      totalCommissionEarned,
+      totalWalletCredits: totalCommissionEarned,
+      walletBalance: totalCommissionEarned,
+    };
+
+    res.json({
+      partner: partnerData,
+      collections: collectionsHistory,
+      labWiseSummary: [],
+      ...partnerData,
       collectionsHistory,
     });
   } catch (error: any) {
@@ -301,6 +335,34 @@ export const updateCollectionPartnerStatus = async (req: Request, res: Response)
           ...(branchId ? { branchId } : {})
         }
       });
+    }
+
+    // Also sync PathologyPartner record
+    const existingPartner = await prisma.pathologyPartner.findUnique({ where: { userId: id } });
+    if (existingPartner) {
+      await prisma.pathologyPartner.update({
+        where: { userId: id },
+        data: {
+          approvalStatus,
+          isAvailable: isActive,
+          ...(branchId ? { branchId } : {})
+        }
+      });
+    } else {
+      const userRec = await prisma.user.findUnique({ where: { id } });
+      if (userRec) {
+        await prisma.pathologyPartner.create({
+          data: {
+            userId: id,
+            labName: `${userRec.name} (Collection Partner)`,
+            role: 'PHLEBOTOMIST',
+            approvalStatus,
+            isAvailable: isActive,
+            commissionRate: 15,
+            branchId: branchId || undefined,
+          }
+        }).catch(console.error);
+      }
     }
 
     if (isActive) {

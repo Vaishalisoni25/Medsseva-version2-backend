@@ -48,11 +48,18 @@ export const getDoctorPortalData = async (req: AuthRequest, res: Response) => {
     const paymentCycle = doctor.paymentCycle || 'MONTHLY';
     const periodStartDate = getPeriodStartDate(period);
 
+    const orConditions: any[] = [
+      { referringDoctorId: doctor.id },
+    ];
+    if (doctor.userId) {
+      orConditions.push({ userId: doctor.userId });
+    }
+    if (doctor.branchId) {
+      orConditions.push({ branchId: doctor.branchId });
+    }
+
     const bookingWhere: any = {
-      OR: [
-        { referringDoctorId: doctor.id },
-        { branchId: doctor.branchId },
-      ],
+      OR: orConditions,
       status: { notIn: ['CANCELLED'] },
     };
 
