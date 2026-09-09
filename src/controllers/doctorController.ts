@@ -158,6 +158,7 @@ export const updateDoctor = async (req: AuthRequest, res: Response) => {
       cityId,
       partnerId,
       isActive,
+      approvalStatus,
     } = req.body;
 
     const data: any = {};
@@ -172,6 +173,7 @@ export const updateDoctor = async (req: AuthRequest, res: Response) => {
     if (cityId !== undefined) data.cityId = cityId;
     if (partnerId !== undefined) data.partnerId = partnerId;
     if (isActive !== undefined) data.isActive = isActive;
+    if (approvalStatus !== undefined) data.approvalStatus = approvalStatus;
 
     const doctor = await (prisma as any).doctor.update({
       where: { id },

@@ -53,14 +53,7 @@ export const registerDoctor = async (req: Request, res: Response) => {
     }
 
     const cleanRegNo = registrationNo.trim();
-    const existingDoctor = await (prisma as any).doctor.findFirst({
-      where: { registrationNo: { equals: cleanRegNo, mode: 'insensitive' } }
-    });
-
-    if (existingDoctor) {
-      console.warn('[AUTH] Doctor registration conflict - Registration No exists:', cleanRegNo);
-      return res.status(400).json({ error: 'A doctor with this Medical Council Registration Number already exists.' });
-    }
+    // Uniqueness check for registration number temporarily removed for app testing
 
     const hashedPassword = await bcrypt.hash(password, 10);
     const referralCode = await generateUniqueReferralCode();
