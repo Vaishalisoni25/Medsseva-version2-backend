@@ -219,3 +219,25 @@ export const removeFamilyMember = async (req: AuthRequest, res: Response) => {
     res.status(500).json({ error: 'Failed to remove family member', details: error.message });
   }
 };
+
+export const deleteMe = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+    // Let Prisma handle cascaded deletions based on schema
+    await prisma.user.delete({
+      where: { id: userId }
+    });
+
+    res.json({ success: true, message: 'Account deleted successfully' });
+  } catch (error: any) {
+    console.error('Error deleting account:', error);
+    // If Prisma throws a foreign key constraint error due to lack of cascade in schema
+    if (error.code === 'P2003') {
+      return res.status(400).json({ error: 'Cannot delete account because there are active bookings or records tied to it. Please contact support.' });
+    }
+    res.status(500).json({ error: 'Failed to delete account', details: error.message });
+  }
+};
+
