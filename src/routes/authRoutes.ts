@@ -33,6 +33,15 @@ router.post('/reset-password', resetPassword);
 
 router.get('/me', authenticate, getMe);
 
+import { documentUpload } from '../middlewares/upload';
+import {
+  uploadPartnerOnboardingDocument,
+  updatePartnerDocumentStatusAdmin,
+} from '../controllers/partnerDocumentController';
+import { getPartnerDetails } from '../controllers/authController';
+
+router.post('/register/partner-document', documentUpload, uploadPartnerOnboardingDocument);
+
 // Admin only
 router.get('/users', authenticate, authorizeRoles('ADMIN', 'SUPER_ADMIN'), getAllUsers);
 router.post('/users', authenticate, authorizeRoles('ADMIN', 'SUPER_ADMIN'), createPatientUser);
@@ -40,7 +49,9 @@ router.put('/users/:id', authenticate, authorizeRoles('ADMIN', 'SUPER_ADMIN'), u
 router.patch('/users/:id', authenticate, authorizeRoles('ADMIN', 'SUPER_ADMIN'), updatePatientUser);
 router.delete('/users/:id', authenticate, authorizeRoles('SUPER_ADMIN'), deletePatientUser);
 router.get('/partners', authenticate, authorizeRoles('ADMIN', 'SUPER_ADMIN'), getPartners);
+router.get('/partners/:id/details', authenticate, authorizeRoles('ADMIN', 'SUPER_ADMIN'), getPartnerDetails);
 router.patch('/partners/:id/approval', authenticate, authorizeRoles('ADMIN', 'SUPER_ADMIN'), updatePartnerApproval);
+router.patch('/partners/:id/documents/:docId', authenticate, authorizeRoles('ADMIN', 'SUPER_ADMIN'), updatePartnerDocumentStatusAdmin);
 router.get('/partners/available', authenticate, authorizeRoles('ADMIN', 'SUPER_ADMIN'), getAvailablePartners);
 
 export default router;

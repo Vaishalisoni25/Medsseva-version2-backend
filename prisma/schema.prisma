@@ -584,34 +584,41 @@ model Offer {
 }
 
 model PathologyPartner {
-  id               String                @id @default(uuid())
-  userId           String                @unique
-  labName          String
-  role             String
-  partnerCode      String?               @unique
-  loginId          String?               @unique
-  password         String?
-  cityId           String?
-  branchId         String?
-  address          String?
-  latitude         Float?
-  longitude        Float?
-  commissionRate   Float                 @default(30.0)
-  paymentCycle     String                @default("MONTHLY")
-  approvalStatus   PartnerApprovalStatus @default(PENDING)
-  rejectionReason  String?
-  isAvailable      Boolean               @default(false)
-  availability     Json?
-  rating           Float                 @default(0)
-  totalCollections Int                   @default(0)
-  totalRatings     Int                   @default(0)
-  createdAt        DateTime              @default(now())
-  updatedAt        DateTime              @updatedAt
-  user             User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
-  bookings         Booking[]             @relation("AssignedPartner")
-  sampleDeliveries SampleDelivery[]
-  ratings          PartnerRating[]
-  commissions      ReferralCommission[]
+  id                   String                @id @default(uuid())
+  userId               String                @unique
+  labName              String
+  ownerName            String?
+  role                 String
+  partnerCode          String?               @unique
+  loginId              String?               @unique
+  password             String?
+  cityId               String?
+  city                 String?
+  state                String?
+  pincode              String?
+  branchId             String?
+  address              String?
+  preferredServiceArea String?
+  latitude             Float?
+  longitude            Float?
+  commissionRate       Float                 @default(30.0)
+  paymentCycle         String                @default("MONTHLY")
+  approvalStatus       PartnerApprovalStatus @default(PENDING)
+  rejectionReason      String?
+  correctionReason     String?
+  isAvailable          Boolean               @default(false)
+  availability         Json?
+  rating               Float                 @default(0)
+  totalCollections     Int                   @default(0)
+  totalRatings         Int                   @default(0)
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  user                 User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bookings             Booking[]             @relation("AssignedPartner")
+  sampleDeliveries     SampleDelivery[]
+  ratings              PartnerRating[]
+  commissions          ReferralCommission[]
+  documents            PartnerDocument[]
 }
 
 model ReferralCommission {
@@ -644,11 +651,57 @@ model ReferralCommission {
   @@index([status])
   @@index([createdAt])
 }
+
 enum PartnerApprovalStatus {
   PENDING
   APPROVED
   REJECTED
   SUSPENDED
+  BLOCKED
+  CORRECTION_REQUIRED
+}
+
+enum PartnerDocumentType {
+  MEDICAL_CEA_REGISTRATION
+  NABL_CERTIFICATE
+  BMW_LICENCE
+  PATHOLOGIST_QUALIFICATION
+  REGISTRATION_CERTIFICATE
+  PAN_CARD
+  GST_CERTIFICATE
+  CANCELLED_CHEQUE
+}
+
+enum PartnerDocumentStatus {
+  NOT_UPLOADED
+  UPLOADED
+  UNDER_REVIEW
+  VERIFIED
+  REJECTED
+  CORRECTION_REQUIRED
+}
+
+model PartnerDocument {
+  id               String                @id @default(uuid())
+  partnerId        String
+  documentType     PartnerDocumentType
+  fileName         String
+  fileUrl          String
+  mimeType         String?
+  fileSize         Int?
+  status           PartnerDocumentStatus @default(UPLOADED)
+  rejectionReason  String?
+  correctionReason String?
+  uploadedAt       DateTime              @default(now())
+  verifiedAt       DateTime?
+  verifiedBy       String?
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+
+  partner PathologyPartner @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  @@unique([partnerId, documentType])
+  @@index([partnerId])
 }
 
 model PartnerRating {

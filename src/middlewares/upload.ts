@@ -48,6 +48,30 @@ export const avatarUpload = multer({
   fileFilter: avatarFileFilter,
 }).single('avatar');
 
+const documentFileFilter = (req: any, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
+  const allowedMime = [
+    'image/jpeg',
+    'image/jpg',
+    'image/png',
+    'image/webp',
+    'application/pdf',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  ];
+  const ext = file.originalname.split('.').pop()?.toLowerCase() || '';
+  const allowedExt = ['jpg', 'jpeg', 'png', 'webp', 'pdf', 'doc', 'docx'];
+  if (!allowedMime.includes(file.mimetype) || !allowedExt.includes(ext)) {
+    return cb(new Error('INVALID_FILE_TYPE:Only JPG, PNG, WEBP, PDF, DOC, and DOCX files are allowed.'));
+  }
+  cb(null, true);
+};
+
+export const documentUpload = multer({
+  storage,
+  limits: { fileSize: 20 * 1024 * 1024 },
+  fileFilter: documentFileFilter,
+}).single('file');
+
 export const uploadToCloudinary = (buffer: Buffer, originalName: string, mimeType: string, folder = 'medseva/prescriptions'): Promise<{ secure_url: string; public_id: string }> => {
   return new Promise((resolve, reject) => {
     const ext = originalName.split('.').pop()?.toLowerCase() || 'bin';

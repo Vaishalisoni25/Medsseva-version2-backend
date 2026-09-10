@@ -96,6 +96,7 @@ app.use('/api', globalLimiter);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/auth', authRoutes);
+app.use('/auth', authRoutes);
 app.use('/api/addresses', addressRoutes);
 app.use('/api/tests', testRoutes);
 app.use('/api/users', userRoutes);

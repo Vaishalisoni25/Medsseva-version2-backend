@@ -51,6 +51,14 @@ router.get('/branch', getPartnerBranch);
 router.get('/ratings', getPartnerRatings);
 router.get('/delivery-branches', getDeliveryBranches);
 router.post('/bookings/:id/select-branch', selectDeliveryBranch);
+import { documentUpload } from '../middlewares/upload';
+import {
+  uploadPartnerOnboardingDocument,
+  getPartnerOnboardingDocuments,
+} from '../controllers/partnerDocumentController';
+
+router.post('/documents/upload', documentUpload, uploadPartnerOnboardingDocument);
+router.get('/documents', getPartnerOnboardingDocuments);
 router.post('/bookings/:id/confirm-delivery', confirmBranchDelivery);
 
 import bcrypt from 'bcryptjs';
