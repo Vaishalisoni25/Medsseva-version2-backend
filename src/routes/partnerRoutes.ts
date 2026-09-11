@@ -56,6 +56,7 @@ router.get('/branch', getPartnerBranch);
 router.get('/ratings', getPartnerRatings);
 router.get('/delivery-branches', getDeliveryBranches);
 router.post('/bookings/:id/select-branch', selectDeliveryBranch);
+router.post('/bookings/:id/confirm-delivery', confirmBranchDelivery);
 import { documentUpload } from '../middlewares/upload';
 import {
   uploadPartnerOnboardingDocument,
