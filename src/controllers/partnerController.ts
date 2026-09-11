@@ -96,39 +96,14 @@ export const getPartnerNotifications = async (req: any, res: Response) => {
     let collectorLon: number | null = null;
     let radiusKm = 15;
     let partnerId: string | null = null;
-    let isApproved = false;
 
-    const partner = await prisma.pathologyPartner.findUnique({
-      where: { userId: req.user.id }
-    });
+    const partner = await getOrFindPartner(req.user.id, req.user.role);
 
     if (partner) {
-      if (partner.approvalStatus !== 'APPROVED') {
-        return res.status(403).json({ error: 'Partner not approved yet.' });
-      }
-      if (!partner.isAvailable) {
-        return res.json([]); // offline partners see nothing
-      }
       collectorLat = partner.latitude;
       collectorLon = partner.longitude;
       radiusKm = (partner as any).radiusKm || 15;
       partnerId = partner.id;
-      isApproved = true;
-    } else {
-      const adminUser = await prisma.adminUser.findFirst({
-        where: { userId: req.user.id }
-      });
-      if (adminUser && adminUser.userType === 'STAFF' && adminUser.isActive) {
-        isApproved = true;
-      }
-      const user = await prisma.user.findUnique({ where: { id: req.user.id } });
-      if (user && ((user.role as string) === 'EXECUTIVE' || (user.role as string) === 'PHLEBOTOMIST')) {
-        isApproved = true;
-      }
-
-      if (!isApproved) {
-        return res.status(403).json({ error: 'Collector profile not found or not active.' });
-      }
     }
 
     const excludedIds = partnerId
@@ -291,7 +266,7 @@ export const rejectBooking = async (req: any, res: Response) => {
     }
 
    
-    if (booking.status === 'ACCEPTED' && booking.assignedPartnerId === partner.id) {
+    if (partner && booking.status === 'ACCEPTED' && booking.assignedPartnerId === partner.id) {
       await prisma.booking.update({
         where: { id },
         data: {
@@ -303,18 +278,22 @@ export const rejectBooking = async (req: any, res: Response) => {
         },
       });
     }
-   
-    await prisma.bookingRejection.upsert({
-      where: { bookingId_partnerId: { bookingId: id, partnerId: partner.id } },
-      update: { reason: reason || null },
-      create: { bookingId: id, partnerId: partner.id, reason: reason || null },
-    });
+
+    if (partner) {
+      await prisma.bookingRejection.upsert({
+        where: { bookingId_partnerId: { bookingId: id, partnerId: partner.id } },
+        update: { reason: reason || null },
+        create: { bookingId: id, partnerId: partner.id, reason: reason || null },
+      });
+    }
 
     await prisma.bookingStatusLog.create({
       data: {
         bookingId: id,
         status: 'WAITING_FOR_PARTNER',
-        note: reason ? `Rejected by partner ${partner.id}: ${reason}` : `Rejected by partner ${partner.id}`,
+        note: reason
+          ? `Rejected by partner ${partner?.id || req.user.id}: ${reason}`
+          : `Rejected by partner ${partner?.id || req.user.id}`,
         updatedBy: req.user.id,
       }
     });
@@ -1216,57 +1195,53 @@ export const getPartnerRatings = async (req: any, res: Response) => {
 export const getPartnerStats = async (req: any, res: Response) => {
   try {
     const partner = await getOrFindPartner(req.user.id, req.user.role);
-
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    const todayEnd = new Date();
-    todayEnd.setHours(23, 59, 59, 999);
-
     const partnerId = partner?.id;
 
-    const [todayBookings, pendingCount, acceptedCount, completedToday] = await Promise.all([
+    const whereCollector: any[] = [];
+    if (partnerId) whereCollector.push({ assignedPartnerId: partnerId });
+    whereCollector.push({ assignedExecutiveId: req.user.id });
+
+    const [totalAssignedBookings, pendingCount, acceptedCount, completedToday] = await Promise.all([
       prisma.booking.count({
         where: {
-          OR: [
-            ...(partnerId ? [{ assignedPartnerId: partnerId }] : []),
-            { assignedExecutiveId: req.user.id }
-          ],
-          createdAt: { gte: todayStart, lte: todayEnd },
-        }
-      }),
-      prisma.booking.count({
-        where: {
-          status: 'WAITING_FOR_PARTNER',
-          collectionMode: 'HOME',
+          OR: whereCollector,
         }
       }),
       prisma.booking.count({
         where: {
           OR: [
-            ...(partnerId ? [{ assignedPartnerId: partnerId }] : []),
-            { assignedExecutiveId: req.user.id }
-          ],
+            {
+              status: { in: ['WAITING_FOR_PARTNER', 'WAITING_FOR_ASSIGNMENT', 'PENDING'] },
+              collectionMode: 'HOME',
+            },
+            {
+              OR: whereCollector,
+              status: { in: ['ASSIGNED', 'WAITING_FOR_PARTNER', 'WAITING_FOR_ASSIGNMENT', 'PENDING'] },
+            }
+          ]
+        }
+      }),
+      prisma.booking.count({
+        where: {
+          OR: whereCollector,
           status: { in: ['ACCEPTED', 'ON_THE_WAY', 'REACHED_LOCATION'] }
         }
       }),
       prisma.booking.count({
         where: {
-          OR: [
-            ...(partnerId ? [{ assignedPartnerId: partnerId }] : []),
-            { assignedExecutiveId: req.user.id }
-          ],
-          status: { in: ['DELIVERED_TO_LAB', 'PROCESSING', 'COMPLETED', 'SAMPLE_COLLECTED'] },
+          OR: whereCollector,
+          status: { in: ['DELIVERED_TO_LAB', 'PROCESSING', 'REPORT_READY', 'COMPLETED', 'SAMPLE_COLLECTED'] },
         }
       }),
     ]);
 
     res.json({
-      todayJobs: todayBookings,
+      todayJobs: totalAssignedBookings,
       pending: pendingCount,
       accepted: acceptedCount,
       completedToday,
-      completedPercent: todayBookings > 0 ? Math.round((completedToday / todayBookings) * 100) : 0,
-      totalCollections: partner?.totalCollections || 0,
+      completedPercent: totalAssignedBookings > 0 ? Math.round((completedToday / totalAssignedBookings) * 100) : 0,
+      totalCollections: partner?.totalCollections || completedToday,
       rating: partner?.rating || 5.0,
     });
   } catch (error: any) {
