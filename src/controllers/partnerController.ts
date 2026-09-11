@@ -37,9 +37,11 @@ export const getPartnerBookings = async (req: any, res: Response) => {
       return res.status(404).json({ error: 'Partner profile not found.' });
     }
 
-    const whereOr: any[] = [];
+    const whereOr: any[] = [
+      { assignedExecutiveId: req.user.id },
+      { paymentReceivedById: req.user.id },
+    ];
     if (partner) whereOr.push({ assignedPartnerId: partner.id });
-    whereOr.push({ assignedExecutiveId: req.user.id });
 
     const bookings = await prisma.booking.findMany({
       where: { OR: whereOr },
@@ -197,12 +199,11 @@ export const acceptBooking = async (req: any, res: Response) => {
     const updateData: any = {
       status: 'ACCEPTED',
       partnerAcceptedAt: new Date(),
+      assignedExecutiveId: req.user.id,
     };
     if (partner) {
       updateData.assignedPartnerId = partner.id;
       updateData.partnerAssignedAt = new Date();
-    } else {
-      updateData.assignedExecutiveId = req.user.id;
     }
 
     const updated = await prisma.booking.updateMany({
@@ -923,13 +924,16 @@ export const getPartnerHistory = async (req: any, res: Response) => {
     const partner = await getOrFindPartner(req.user.id, req.user.role);
     const partnerId = partner?.id;
 
+    const whereCollector: any[] = [
+      { assignedExecutiveId: req.user.id },
+      { paymentReceivedById: req.user.id },
+    ];
+    if (partnerId) whereCollector.push({ assignedPartnerId: partnerId });
+
     // Bookings this partner completed or was assigned to (any terminal status)
     const assignedBookings = await prisma.booking.findMany({
       where: {
-        OR: [
-          ...(partnerId ? [{ assignedPartnerId: partnerId }] : []),
-          { assignedExecutiveId: req.user.id },
-        ],
+        OR: whereCollector,
         status: { in: ['DELIVERED_TO_LAB', 'PROCESSING', 'REPORT_READY', 'COMPLETED', 'CANCELLED'] },
       },
       include: {
@@ -1197,9 +1201,11 @@ export const getPartnerStats = async (req: any, res: Response) => {
     const partner = await getOrFindPartner(req.user.id, req.user.role);
     const partnerId = partner?.id;
 
-    const whereCollector: any[] = [];
+    const whereCollector: any[] = [
+      { assignedExecutiveId: req.user.id },
+      { paymentReceivedById: req.user.id },
+    ];
     if (partnerId) whereCollector.push({ assignedPartnerId: partnerId });
-    whereCollector.push({ assignedExecutiveId: req.user.id });
 
     const [totalAssignedBookings, pendingCount, acceptedCount, completedToday] = await Promise.all([
       prisma.booking.count({
