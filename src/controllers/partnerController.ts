@@ -1217,12 +1217,14 @@ export const getPartnerStats = async (req: any, res: Response) => {
         where: {
           OR: [
             {
-              status: { in: ['WAITING_FOR_PARTNER', 'WAITING_FOR_ASSIGNMENT', 'PENDING'] },
-              collectionMode: 'HOME',
+              OR: whereCollector,
+              status: { in: ['ASSIGNED', 'WAITING_FOR_PARTNER', 'ACCEPTED', 'ON_THE_WAY', 'REACHED_LOCATION', 'SAMPLE_COLLECTED', 'DELIVERING_TO_BRANCH', 'PENDING'] },
             },
             {
-              OR: whereCollector,
-              status: { in: ['ASSIGNED', 'WAITING_FOR_PARTNER', 'WAITING_FOR_ASSIGNMENT', 'PENDING'] },
+              status: { in: ['WAITING_FOR_PARTNER', 'WAITING_FOR_ASSIGNMENT', 'PENDING'] },
+              collectionMode: 'HOME',
+              assignedExecutiveId: null,
+              assignedPartnerId: null,
             }
           ]
         }
@@ -1230,13 +1232,13 @@ export const getPartnerStats = async (req: any, res: Response) => {
       prisma.booking.count({
         where: {
           OR: whereCollector,
-          status: { in: ['ACCEPTED', 'ON_THE_WAY', 'REACHED_LOCATION'] }
+          status: { in: ['ACCEPTED', 'ON_THE_WAY', 'REACHED_LOCATION', 'SAMPLE_COLLECTED', 'DELIVERING_TO_BRANCH'] }
         }
       }),
       prisma.booking.count({
         where: {
           OR: whereCollector,
-          status: { in: ['DELIVERED_TO_LAB', 'PROCESSING', 'REPORT_READY', 'COMPLETED', 'SAMPLE_COLLECTED'] },
+          status: { in: ['DELIVERED_TO_LAB', 'PROCESSING', 'REPORT_READY', 'COMPLETED'] },
         }
       }),
     ]);
