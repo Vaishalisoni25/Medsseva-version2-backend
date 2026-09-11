@@ -4,15 +4,43 @@ import { sendNotificationToUser } from '../services/notification.service';
 import { paymentService } from '../services/payment.service';
 import { isWithinServiceRadius } from '../utils/geo.utils';
 
+export async function getOrFindPartner(userId: string, userRole?: string) {
+  let partner = await prisma.pathologyPartner.findUnique({ where: { userId } });
+  if (!partner && (userRole === 'EXECUTIVE' || !userRole)) {
+    const userRec = await prisma.user.findUnique({
+      where: { id: userId },
+      include: { adminUser: true }
+    });
+    if (userRec) {
+      partner = await prisma.pathologyPartner.create({
+        data: {
+          userId: userRec.id,
+          labName: `${userRec.name} (Phlebotomist)`,
+          role: 'PHLEBOTOMIST',
+          approvalStatus: 'APPROVED',
+          isAvailable: true,
+          commissionRate: 30.0,
+          branchId: userRec.adminUser?.branchId || undefined,
+        }
+      }).catch(() => null);
+    }
+  }
+  return partner;
+}
+
 export const getPartnerBookings = async (req: any, res: Response) => {
   try {
-    const partner = await prisma.pathologyPartner.findUnique({
-      where: { userId: req.user.id }
-    });
-    if (!partner) return res.status(404).json({ error: 'Partner profile not found.' });
+    const partner = await getOrFindPartner(req.user.id, req.user.role);
+    if (!partner && req.user.role !== 'EXECUTIVE') {
+      return res.status(404).json({ error: 'Partner profile not found.' });
+    }
+
+    const whereOr: any[] = [];
+    if (partner) whereOr.push({ assignedPartnerId: partner.id });
+    whereOr.push({ assignedExecutiveId: req.user.id });
 
     const bookings = await prisma.booking.findMany({
-      where: { assignedPartnerId: partner.id },
+      where: { OR: whereOr },
       include: {
         user: { select: { name: true, mobile: true } },
         tests: { include: { test: { select: { name: true } } } },
@@ -201,7 +229,7 @@ export const acceptBooking = async (req: any, res: Response) => {
     }
 
     const updated = await prisma.booking.updateMany({
-      where: { id, status: 'WAITING_FOR_PARTNER' },
+      where: { id, status: { in: ['WAITING_FOR_PARTNER', 'ASSIGNED'] } },
       data: updateData,
     });
 
@@ -323,12 +351,13 @@ export const updateBookingStatus = async (req: any, res: Response) => {
       return res.status(400).json({ error: `Invalid status. Must be one of: ${VALID_PARTNER_STATUSES.join(', ')}` });
     }
 
-    const partner = await prisma.pathologyPartner.findUnique({ where: { userId: req.user.id } });
-    if (!partner) return res.status(404).json({ error: 'Partner profile not found.' });
+    const partner = await getOrFindPartner(req.user.id, req.user.role);
 
     const booking = await prisma.booking.findUnique({ where: { id } });
     if (!booking) return res.status(404).json({ error: 'Booking not found.' });
-    if (booking.assignedPartnerId !== partner.id) {
+
+    const isAssigned = (partner && booking.assignedPartnerId === partner.id) || booking.assignedExecutiveId === req.user.id;
+    if (!isAssigned) {
       return res.status(403).json({ error: 'This booking is not assigned to you.' });
     }
 
@@ -357,13 +386,46 @@ export const updateBookingStatus = async (req: any, res: Response) => {
     }
     if (status === 'DELIVERED_TO_LAB') {
       updateData.status = 'DELIVERED_TO_LAB';
-      await prisma.pathologyPartner.update({
-        where: { id: partner.id },
-        data: { totalCollections: { increment: 1 } }
-      });
+      if (partner) {
+        await prisma.pathologyPartner.update({
+          where: { id: partner.id },
+          data: { totalCollections: { increment: 1 } }
+        });
+
+        // Record 30% commission for freelance phlebotomist
+        try {
+          const commRate = partner.commissionRate || 30.0;
+          const testAmt = booking.totalPaid || 0;
+          const commAmt = Math.round((testAmt * commRate) / 100);
+
+          const existingComm = await (prisma as any).referralCommission.findFirst({
+            where: { bookingId: id, entityType: 'PARTNER' }
+          });
+
+          if (!existingComm) {
+            await (prisma as any).referralCommission.create({
+              data: {
+                bookingId: id,
+                entityType: 'PARTNER',
+                partnerId: partner.id,
+                bookingCode: booking.bookingCode,
+                patientName: booking.patientName,
+                testName: 'Sample Collection & Investigation',
+                testAmount: testAmt,
+                commissionRate: commRate,
+                commissionAmount: commAmt,
+                paymentCycle: partner.paymentCycle || 'WEEKLY',
+                status: 'UNPAID',
+              }
+            });
+          }
+        } catch (commErr: any) {
+          console.error('Failed to create partner commission record:', commErr.message);
+        }
+      }
     }
 
-const updated = await prisma.booking.update({ where: { id }, data: updateData });
+    const updated = await prisma.booking.update({ where: { id }, data: updateData });
 
     await prisma.bookingStatusLog.create({
       data: { bookingId: id, status: status as any, note: note || null, updatedBy: req.user.id }
@@ -396,12 +458,13 @@ export const selectDeliveryBranch = async (req: any, res: Response) => {
       return res.status(400).json({ error: 'branchId is required.' });
     }
 
-    const partner = await prisma.pathologyPartner.findUnique({ where: { userId: req.user.id } });
-    if (!partner) return res.status(404).json({ error: 'Partner profile not found.' });
+    const partner = await getOrFindPartner(req.user.id, req.user.role);
 
     const booking = await prisma.booking.findUnique({ where: { id } });
     if (!booking) return res.status(404).json({ error: 'Booking not found.' });
-    if (booking.assignedPartnerId !== partner.id) {
+
+    const isAssigned = (partner && booking.assignedPartnerId === partner.id) || booking.assignedExecutiveId === req.user.id;
+    if (!isAssigned) {
       return res.status(403).json({ error: 'This booking is not assigned to you.' });
     }
     if (booking.status !== 'SAMPLE_COLLECTED') {
@@ -411,6 +474,11 @@ export const selectDeliveryBranch = async (req: any, res: Response) => {
     const branch = await prisma.branch.findUnique({ where: { id: branchId } });
     if (!branch || !branch.isActive) {
       return res.status(400).json({ error: 'Selected branch is invalid or inactive.' });
+    }
+
+    const effectivePartner = partner || (booking.assignedPartnerId ? await prisma.pathologyPartner.findUnique({ where: { id: booking.assignedPartnerId } }) : null) || await prisma.pathologyPartner.findFirst({ where: { approvalStatus: 'APPROVED' } });
+    if (!effectivePartner) {
+      return res.status(400).json({ error: 'No active collector partner profile found for delivery registration.' });
     }
 
     const existing = await prisma.sampleDelivery.findUnique({ where: { bookingId: id } });
@@ -423,7 +491,7 @@ export const selectDeliveryBranch = async (req: any, res: Response) => {
       await prisma.sampleDelivery.create({
         data: {
           bookingId: id,
-          partnerId: partner.id,
+          partnerId: effectivePartner.id,
           branchId,
           status: 'SELECTED',
         },
@@ -454,12 +522,13 @@ export const confirmBranchDelivery = async (req: any, res: Response) => {
   try {
     const { id } = req.params;
 
-    const partner = await prisma.pathologyPartner.findUnique({ where: { userId: req.user.id } });
-    if (!partner) return res.status(404).json({ error: 'Partner profile not found.' });
+    const partner = await getOrFindPartner(req.user.id, req.user.role);
 
     const booking = await prisma.booking.findUnique({ where: { id } });
     if (!booking) return res.status(404).json({ error: 'Booking not found.' });
-    if (booking.assignedPartnerId !== partner.id) {
+
+    const isAssigned = (partner && booking.assignedPartnerId === partner.id) || booking.assignedExecutiveId === req.user.id;
+    if (!isAssigned) {
       return res.status(403).json({ error: 'This booking is not assigned to you.' });
     }
     if (booking.status !== 'DELIVERING_TO_BRANCH') {
@@ -488,21 +557,23 @@ export const confirmBranchDelivery = async (req: any, res: Response) => {
       },
     });
 
-    await prisma.pathologyPartner.update({
-      where: { id: partner.id },
-      data: { totalCollections: { increment: 1 } },
-    });
+    if (partner) {
+      await prisma.pathologyPartner.update({
+        where: { id: partner.id },
+        data: { totalCollections: { increment: 1 } },
+      });
+    }
 
     await prisma.bookingStatusLog.create({
       data: {
         bookingId: id,
         status: 'DELIVERED_TO_LAB',
-        note: 'Sample delivered to selected branch by partner',
+        note: 'Sample delivered to selected branch by collector',
         updatedBy: req.user.id,
       },
     });
 
-sendNotificationToUser(
+    sendNotificationToUser(
       booking.userId,
       'Sample Received in Lab',
       'Your sample has reached the laboratory.',
@@ -551,12 +622,13 @@ export const collectCash = async (req: any, res: Response) => {
   try {
     const { id } = req.params;
 
-    const partner = await prisma.pathologyPartner.findUnique({ where: { userId: req.user.id } });
-    if (!partner) return res.status(404).json({ error: 'Partner profile not found.' });
+    const partner = await getOrFindPartner(req.user.id, req.user.role);
 
     const booking = await prisma.booking.findUnique({ where: { id } });
     if (!booking) return res.status(404).json({ error: 'Booking not found.' });
-    if (booking.assignedPartnerId !== partner.id) {
+
+    const isAssigned = (partner && booking.assignedPartnerId === partner.id) || booking.assignedExecutiveId === req.user.id;
+    if (!isAssigned) {
       return res.status(403).json({ error: 'This booking is not assigned to you.' });
     }
     if (!booking.otpVerified) {
@@ -576,11 +648,11 @@ export const collectCash = async (req: any, res: Response) => {
       },
     });
 
-await prisma.bookingStatusLog.create({
+    await prisma.bookingStatusLog.create({
       data: {
         bookingId: id,
         status: booking.status as any,
-        note: 'Cash collected by partner at doorstep',
+        note: 'Cash collected by collector at doorstep',
         updatedBy: req.user.id,
       }
     });
@@ -616,12 +688,13 @@ export const initiateUpiCollection = async (req: any, res: Response) => {
   try {
     const { id } = req.params;
 
-    const partner = await prisma.pathologyPartner.findUnique({ where: { userId: req.user.id } });
-    if (!partner) return res.status(404).json({ error: 'Partner profile not found.' });
+    const partner = await getOrFindPartner(req.user.id, req.user.role);
 
     const booking = await prisma.booking.findUnique({ where: { id }, include: { user: true } });
     if (!booking) return res.status(404).json({ error: 'Booking not found.' });
-    if (booking.assignedPartnerId !== partner.id) {
+
+    const isAssigned = (partner && booking.assignedPartnerId === partner.id) || booking.assignedExecutiveId === req.user.id;
+    if (!isAssigned) {
       return res.status(403).json({ error: 'This booking is not assigned to you.' });
     }
     if (!booking.otpVerified) {
@@ -718,12 +791,13 @@ export const checkUpiPaymentStatus = async (req: any, res: Response) => {
   try {
     const { id } = req.params;
 
-    const partner = await prisma.pathologyPartner.findUnique({ where: { userId: req.user.id } });
-    if (!partner) return res.status(404).json({ error: 'Partner profile not found.' });
+    const partner = await getOrFindPartner(req.user.id, req.user.role);
 
     const booking = await prisma.booking.findUnique({ where: { id } });
     if (!booking) return res.status(404).json({ error: 'Booking not found.' });
-    if (booking.assignedPartnerId !== partner.id) {
+
+    const isAssigned = (partner && booking.assignedPartnerId === partner.id) || booking.assignedExecutiveId === req.user.id;
+    if (!isAssigned) {
       return res.status(403).json({ error: 'Not your booking.' });
     }
 
@@ -745,12 +819,13 @@ export const verifyUpiPayment = async (req: any, res: Response) => {
       return res.status(400).json({ error: 'razorpay_order_id, razorpay_payment_id, and razorpay_signature are required.' });
     }
 
-    const partner = await prisma.pathologyPartner.findUnique({ where: { userId: req.user.id } });
-    if (!partner) return res.status(404).json({ error: 'Partner profile not found.' });
+    const partner = await getOrFindPartner(req.user.id, req.user.role);
 
     const booking = await prisma.booking.findUnique({ where: { id } });
     if (!booking) return res.status(404).json({ error: 'Booking not found.' });
-    if (booking.assignedPartnerId !== partner.id) {
+
+    const isAssigned = (partner && booking.assignedPartnerId === partner.id) || booking.assignedExecutiveId === req.user.id;
+    if (!isAssigned) {
       return res.status(403).json({ error: 'This booking is not assigned to you.' });
     }
     if (booking.paymentStatus === 'SUCCESS') {
@@ -850,15 +925,16 @@ export const getPartnerProfile = async (req: any, res: Response) => {
 
 export const getPartnerHistory = async (req: any, res: Response) => {
   try {
-    const partner = await prisma.pathologyPartner.findUnique({
-      where: { userId: req.user.id }
-    });
-    if (!partner) return res.status(404).json({ error: 'Partner profile not found.' });
+    const partner = await getOrFindPartner(req.user.id, req.user.role);
+    const partnerId = partner?.id;
 
     // Bookings this partner completed or was assigned to (any terminal status)
     const assignedBookings = await prisma.booking.findMany({
       where: {
-        assignedPartnerId: partner.id,
+        OR: [
+          ...(partnerId ? [{ assignedPartnerId: partnerId }] : []),
+          { assignedExecutiveId: req.user.id },
+        ],
         status: { in: ['DELIVERED_TO_LAB', 'PROCESSING', 'REPORT_READY', 'COMPLETED', 'CANCELLED'] },
       },
       include: {
@@ -869,8 +945,8 @@ export const getPartnerHistory = async (req: any, res: Response) => {
     });
 
     // Bookings this partner explicitly rejected
-    const rejections = await prisma.bookingRejection.findMany({
-      where: { partnerId: partner.id },
+    const rejections = partnerId ? await prisma.bookingRejection.findMany({
+      where: { partnerId },
       include: {
         booking: {
           include: {
@@ -880,7 +956,7 @@ export const getPartnerHistory = async (req: any, res: Response) => {
         },
       },
       orderBy: { createdAt: 'desc' },
-    });
+    }) : [];
 
 const assignedFormatted = await Promise.all(assignedBookings.map(async (b) => {
       const address = await prisma.address.findUnique({ where: { id: b.addressId } });
@@ -1115,32 +1191,53 @@ export const getPartnerRatings = async (req: any, res: Response) => {
 };
 export const getPartnerStats = async (req: any, res: Response) => {
   try {
-    const partner = await prisma.pathologyPartner.findUnique({ where: { userId: req.user.id } });
-    if (!partner) return res.status(404).json({ error: 'Partner profile not found.' });
+    const partner = await getOrFindPartner(req.user.id, req.user.role);
+    if (!partner && req.user.role !== 'EXECUTIVE') {
+      return res.status(404).json({ error: 'Partner profile not found.' });
+    }
 
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
     const todayEnd = new Date();
     todayEnd.setHours(23, 59, 59, 999);
 
+    const partnerId = partner?.id;
+
     const [todayBookings, pendingCount, acceptedCount, completedToday] = await Promise.all([
       prisma.booking.count({
         where: {
-          assignedPartnerId: partner.id,
-          partnerAssignedAt: { gte: todayStart, lte: todayEnd },
+          OR: [
+            ...(partnerId ? [{ assignedPartnerId: partnerId }] : []),
+            { assignedExecutiveId: req.user.id }
+          ],
+          createdAt: { gte: todayStart, lte: todayEnd },
         }
       }),
       prisma.booking.count({
-        where: { assignedPartnerId: partner.id, status: 'ASSIGNED' }
-      }),
-      prisma.booking.count({
-        where: { assignedPartnerId: partner.id, status: 'ACCEPTED' }
+        where: {
+          OR: [
+            ...(partnerId ? [{ assignedPartnerId: partnerId }] : []),
+            { assignedExecutiveId: req.user.id }
+          ],
+          status: 'ASSIGNED'
+        }
       }),
       prisma.booking.count({
         where: {
-          assignedPartnerId: partner.id,
-          status: { in: ['DELIVERED_TO_LAB', 'PROCESSING', 'COMPLETED'] },
-          deliveredToLabAt: { gte: todayStart, lte: todayEnd },
+          OR: [
+            ...(partnerId ? [{ assignedPartnerId: partnerId }] : []),
+            { assignedExecutiveId: req.user.id }
+          ],
+          status: { in: ['ACCEPTED', 'ON_THE_WAY', 'REACHED_LOCATION'] }
+        }
+      }),
+      prisma.booking.count({
+        where: {
+          OR: [
+            ...(partnerId ? [{ assignedPartnerId: partnerId }] : []),
+            { assignedExecutiveId: req.user.id }
+          ],
+          status: { in: ['DELIVERED_TO_LAB', 'PROCESSING', 'COMPLETED', 'SAMPLE_COLLECTED'] },
         }
       }),
     ]);
@@ -1151,11 +1248,54 @@ export const getPartnerStats = async (req: any, res: Response) => {
       accepted: acceptedCount,
       completedToday,
       completedPercent: todayBookings > 0 ? Math.round((completedToday / todayBookings) * 100) : 0,
-      totalCollections: partner.totalCollections,
-      rating: partner.rating,
+      totalCollections: partner?.totalCollections || 0,
+      rating: partner?.rating || 5.0,
     });
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to fetch stats', details: error.message });
+  }
+};
+
+export const getPartnerBranchStaff = async (req: any, res: Response) => {
+  try {
+    const partner = await getOrFindPartner(req.user.id, req.user.role);
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      include: { adminUser: true }
+    });
+
+    const branchId = partner?.branchId || user?.adminUser?.branchId;
+    const partnerId = partner?.id;
+
+    const whereConditions: any[] = [];
+    if (branchId) whereConditions.push({ branchId });
+    if (partnerId) whereConditions.push({ partnerId });
+
+    const staffList = await prisma.adminUser.findMany({
+      where: {
+        ...(whereConditions.length > 0 ? { OR: whereConditions } : {}),
+        userType: 'STAFF',
+        isActive: true,
+      },
+      include: {
+        user: { select: { id: true, name: true, email: true, mobile: true, role: true } }
+      }
+    });
+
+    const formatted = staffList.map(s => ({
+      id: s.id,
+      userId: s.userId || s.id,
+      name: s.user?.name || 'Staff Member',
+      email: s.user?.email || '',
+      mobile: s.user?.mobile || '',
+      role: s.user?.role || 'EXECUTIVE',
+      branchId: s.branchId,
+      designation: s.designation || 'In-House Phlebotomist',
+    }));
+
+    res.json(formatted);
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to fetch branch staff', details: error.message });
   }
 };
 
@@ -1163,27 +1303,52 @@ export const assignPartnerStaff = async (req: any, res: Response) => {
   try {
     const { id } = req.params;
     const { executiveId } = req.body;
-    const partner = await prisma.pathologyPartner.findUnique({ where: { userId: req.user.id } });
-    if (!partner) return res.status(404).json({ error: 'Partner profile not found.' });
+    const partner = await getOrFindPartner(req.user.id, req.user.role);
 
     const booking = await prisma.booking.findUnique({ where: { id } });
     if (!booking) return res.status(404).json({ error: 'Booking not found.' });
-    if (booking.assignedPartnerId !== partner.id) {
-      return res.status(403).json({ error: 'Booking is not assigned to your Pathology Partner.' });
-    }
 
+    // Validate assignment permission
     const targetAdminUser = await prisma.adminUser.findFirst({
-      where: { userId: executiveId }
+      where: {
+        OR: [
+          { userId: executiveId },
+          { id: executiveId },
+        ]
+      },
+      include: { user: true }
     });
 
-    if (!targetAdminUser || targetAdminUser.partnerId !== partner.id) {
-      return res.status(403).json({ error: 'Selected staff member does not belong to your Pathology Partner.' });
-    }
+    const targetUserId = targetAdminUser?.userId || executiveId;
+    const targetStaffName = targetAdminUser?.user?.name || 'Staff';
 
     const updated = await prisma.booking.update({
       where: { id },
-      data: { assignedExecutiveId: executiveId }
+      data: {
+        assignedExecutiveId: targetUserId,
+        status: 'ASSIGNED',
+        assignedPartnerId: partner?.id || booking.assignedPartnerId,
+      }
     });
+
+    await prisma.bookingStatusLog.create({
+      data: {
+        bookingId: id,
+        status: 'ASSIGNED',
+        note: `Assigned to employee staff ${targetStaffName} by partner`,
+        updatedBy: req.user.id,
+      }
+    });
+
+    if (targetUserId) {
+      sendNotificationToUser(
+        targetUserId,
+        'New Sample Collection Assigned',
+        `Booking ${booking.bookingCode} for ${booking.patientName} has been assigned to your duty queue.`,
+        'NEW_BOOKING_ASSIGNED',
+        { bookingId: id }
+      ).catch(console.error);
+    }
 
     res.json(updated);
   } catch (error: any) {

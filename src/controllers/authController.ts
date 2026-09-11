@@ -248,21 +248,44 @@ export const registerPartner = async (req: Request, res: Response) => {
 
 export const registerPhlebotomist = async (req: Request, res: Response) => {
   try {
-    const { name, email, mobile, password, qualification, experience, serviceArea, address } = req.body;
-    console.log('[AUTH] >>> POST /api/auth/register/phlebotomist received with body:', { name, mobile, email, qualification });
+    const { name, email, mobile, password, qualification, experience, serviceArea, address, document } = req.body;
+    console.log('[AUTH] >>> POST /api/auth/register/phlebotomist received with body:', { name, mobile, email, qualification, hasDoc: !!document });
 
     const cleanMobile = String(mobile || '').trim().replace(/\D/g, '').slice(-10);
     if (cleanMobile.length !== 10) {
       return res.status(400).json({ error: 'Please enter a valid 10-digit mobile number' });
     }
-    const cleanEmail = email ? email.trim().toLowerCase() : undefined;
+    const cleanEmail = email && String(email).trim() ? String(email).trim().toLowerCase() : undefined;
 
-    const existing = await prisma.user.findFirst({
-      where: { OR: [{ mobile: cleanMobile }, ...(cleanEmail ? [{ email: cleanEmail }] : [])] }
+    // Check if mobile number is already registered in DB
+    const existingByMobile = await prisma.user.findFirst({
+      where: { mobile: cleanMobile }
     });
+    if (existingByMobile) {
+      return res.status(400).json({ error: 'This mobile number is already registered in MedsSeva. Please login instead.' });
+    }
 
-    if (existing) {
-      return res.status(400).json({ error: existing.mobile === cleanMobile ? 'Mobile already registered' : 'Email already in use' });
+    // Check if email is already registered in DB
+    if (cleanEmail) {
+      const existingByEmail = await prisma.user.findFirst({
+        where: { email: { equals: cleanEmail, mode: 'insensitive' } }
+      });
+      if (existingByEmail) {
+        return res.status(400).json({ error: 'This email is already registered in MedsSeva. Please use a different email or login.' });
+      }
+    }
+
+    // Require Government ID (Aadhaar Card or PAN Card)
+    const docData = document || (req.body.documentUrl ? {
+      documentType: req.body.documentType || 'AADHAAR',
+      fileUrl: req.body.documentUrl,
+      fileName: req.body.documentName || 'Govt_ID.jpg',
+      mimeType: req.body.mimeType || 'image/jpeg',
+      fileSize: req.body.fileSize || 0,
+    } : null);
+
+    if (!docData || !docData.fileUrl) {
+      return res.status(400).json({ error: 'Government ID (Aadhaar Card or PAN Card) is required to register as Phlebotomist.' });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -304,6 +327,7 @@ export const registerPhlebotomist = async (req: Request, res: Response) => {
         department: serviceArea ? serviceArea.trim() : 'Collection Operations',
         designation: designationStr,
         qualification: qualStr,
+        registrationNo: docData.documentType ? `${docData.documentType}: Uploaded` : null,
         userType: 'STAFF',
         isActive: false, // PENDING approval
       }
@@ -324,7 +348,7 @@ export const registerPhlebotomist = async (req: Request, res: Response) => {
     }
 
     // Also create PathologyPartner record with role PHLEBOTOMIST and PENDING status
-    await prisma.pathologyPartner.create({
+    const partner = await prisma.pathologyPartner.create({
       data: {
         userId: user.id,
         labName: `${user.name} (Phlebotomist)`,
@@ -336,7 +360,23 @@ export const registerPhlebotomist = async (req: Request, res: Response) => {
         paymentCycle: 'WEEKLY',
         isAvailable: false,
       }
-    }).catch(err => console.warn('Phlebotomist pathology partner creation non-fatal:', err.message));
+    });
+
+    // Save uploaded Government ID (Aadhaar or PAN) to PartnerDocument
+    const isPan = String(docData.documentType || '').toUpperCase().includes('PAN');
+    const partnerDocType = isPan ? 'PAN_CARD' : 'REGISTRATION_CERTIFICATE';
+
+    await prisma.partnerDocument.create({
+      data: {
+        partnerId: partner.id,
+        documentType: partnerDocType as any,
+        fileName: docData.fileName || (isPan ? 'PAN_Card.jpg' : 'Aadhaar_Card.jpg'),
+        fileUrl: docData.fileUrl,
+        mimeType: docData.mimeType || 'image/jpeg',
+        fileSize: docData.fileSize ? Number(docData.fileSize) : 0,
+        status: 'UPLOADED',
+      }
+    }).catch(err => console.warn('Phlebotomist document save error non-fatal:', err.message));
 
     res.status(201).json({
       message: 'Phlebotomist application submitted. Awaiting admin approval.',
@@ -1164,8 +1204,21 @@ export const updatePartnerApproval = async (req: Request, res: Response) => {
 
 export const getAvailablePartners = async (req: Request, res: Response) => {
   try {
+    const { branchId, cityId } = req.query;
+    const whereClause: any = { approvalStatus: 'APPROVED', isAvailable: true };
+
+    if (branchId && branchId !== 'ALL' && branchId !== 'all') {
+      whereClause.OR = [
+        { branchId: String(branchId) },
+        { branchId: null }
+      ];
+    }
+    if (cityId && cityId !== 'ALL' && cityId !== 'all') {
+      whereClause.cityId = String(cityId);
+    }
+
     const partners = await prisma.pathologyPartner.findMany({
-      where: { approvalStatus: 'APPROVED', isAvailable: true },
+      where: whereClause,
       include: {
         user: { select: { id: true, name: true, mobile: true, avatarUrl: true } }
       }

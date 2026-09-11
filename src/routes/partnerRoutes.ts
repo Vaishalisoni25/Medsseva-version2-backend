@@ -23,6 +23,7 @@ import {
   confirmBranchDelivery,
   getDeliveryBranches,
   assignPartnerStaff,
+  getPartnerBranchStaff,
 } from '../controllers/partnerController';
 
 const router = Router();
@@ -32,6 +33,7 @@ router.use(authenticate, authorizeRoles('PATHOLOGY_PARTNER', 'EXECUTIVE'));
 
 router.get('/notifications', getPartnerNotifications);
 router.get('/bookings', getPartnerBookings);
+router.get('/branch-staff', getPartnerBranchStaff);
 router.patch('/bookings/:id/accept', acceptBooking);
 router.patch('/bookings/:id/assign-staff', assignPartnerStaff);
 router.patch('/bookings/:id/reject', rejectBooking);
