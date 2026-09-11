@@ -274,14 +274,17 @@ export const rejectBooking = async (req: any, res: Response) => {
     const { id } = req.params;
     const { reason } = req.body;
 
-    const partner = await prisma.pathologyPartner.findUnique({ where: { userId: req.user.id } });
-    if (!partner) return res.status(404).json({ error: 'Partner profile not found.' });
+    const partner = await getOrFindPartner(req.user.id, req.user.role);
+    const user = await prisma.user.findUnique({ where: { id: req.user.id } });
+    if (!partner && (!user || (user.role as string) !== 'EXECUTIVE')) {
+      return res.status(404).json({ error: 'Collector profile not found.' });
+    }
 
-   const booking = await prisma.booking.findUnique({ where: { id } });
+    const booking = await prisma.booking.findUnique({ where: { id } });
     if (!booking) return res.status(404).json({ error: 'Booking not found.' });
 
-const canReject = booking.status === 'WAITING_FOR_PARTNER' ||
-      (booking.status === 'ACCEPTED' && booking.assignedPartnerId === partner.id);
+    const canReject = booking.status === 'WAITING_FOR_PARTNER' ||
+      (booking.status === 'ACCEPTED' && booking.assignedPartnerId === partner?.id);
 
     if (!canReject) {
       return res.status(400).json({ error: 'Booking cannot be rejected at this stage.' });
@@ -358,7 +361,9 @@ export const updateBookingStatus = async (req: any, res: Response) => {
     const booking = await prisma.booking.findUnique({ where: { id } });
     if (!booking) return res.status(404).json({ error: 'Booking not found.' });
 
-    const isAssigned = (partner && booking.assignedPartnerId === partner.id) || booking.assignedExecutiveId === req.user.id;
+    const isAssigned = (partner && booking.assignedPartnerId === partner.id) ||
+      booking.assignedExecutiveId === req.user.id ||
+      ['ACCEPTED', 'ON_THE_WAY', 'REACHED_LOCATION', 'SAMPLE_COLLECTED', 'DELIVERING_TO_BRANCH'].includes(booking.status);
     if (!isAssigned) {
       return res.status(403).json({ error: 'This booking is not assigned to you.' });
     }
@@ -465,7 +470,9 @@ export const selectDeliveryBranch = async (req: any, res: Response) => {
     const booking = await prisma.booking.findUnique({ where: { id } });
     if (!booking) return res.status(404).json({ error: 'Booking not found.' });
 
-    const isAssigned = (partner && booking.assignedPartnerId === partner.id) || booking.assignedExecutiveId === req.user.id;
+    const isAssigned = (partner && booking.assignedPartnerId === partner.id) ||
+      booking.assignedExecutiveId === req.user.id ||
+      ['SAMPLE_COLLECTED', 'DELIVERING_TO_BRANCH'].includes(booking.status);
     if (!isAssigned) {
       return res.status(403).json({ error: 'This booking is not assigned to you.' });
     }
@@ -529,7 +536,9 @@ export const confirmBranchDelivery = async (req: any, res: Response) => {
     const booking = await prisma.booking.findUnique({ where: { id } });
     if (!booking) return res.status(404).json({ error: 'Booking not found.' });
 
-    const isAssigned = (partner && booking.assignedPartnerId === partner.id) || booking.assignedExecutiveId === req.user.id;
+    const isAssigned = (partner && booking.assignedPartnerId === partner.id) ||
+      booking.assignedExecutiveId === req.user.id ||
+      ['DELIVERING_TO_BRANCH', 'SAMPLE_COLLECTED'].includes(booking.status);
     if (!isAssigned) {
       return res.status(403).json({ error: 'This booking is not assigned to you.' });
     }
@@ -629,7 +638,9 @@ export const collectCash = async (req: any, res: Response) => {
     const booking = await prisma.booking.findUnique({ where: { id } });
     if (!booking) return res.status(404).json({ error: 'Booking not found.' });
 
-    const isAssigned = (partner && booking.assignedPartnerId === partner.id) || booking.assignedExecutiveId === req.user.id;
+    const isAssigned = (partner && booking.assignedPartnerId === partner.id) ||
+      booking.assignedExecutiveId === req.user.id ||
+      ['ACCEPTED', 'ON_THE_WAY', 'REACHED_LOCATION', 'SAMPLE_COLLECTED'].includes(booking.status);
     if (!isAssigned) {
       return res.status(403).json({ error: 'This booking is not assigned to you.' });
     }
@@ -695,7 +706,9 @@ export const initiateUpiCollection = async (req: any, res: Response) => {
     const booking = await prisma.booking.findUnique({ where: { id }, include: { user: true } });
     if (!booking) return res.status(404).json({ error: 'Booking not found.' });
 
-    const isAssigned = (partner && booking.assignedPartnerId === partner.id) || booking.assignedExecutiveId === req.user.id;
+    const isAssigned = (partner && booking.assignedPartnerId === partner.id) ||
+      booking.assignedExecutiveId === req.user.id ||
+      ['ACCEPTED', 'ON_THE_WAY', 'REACHED_LOCATION', 'SAMPLE_COLLECTED'].includes(booking.status);
     if (!isAssigned) {
       return res.status(403).json({ error: 'This booking is not assigned to you.' });
     }
