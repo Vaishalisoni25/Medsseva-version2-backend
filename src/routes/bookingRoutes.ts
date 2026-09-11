@@ -33,7 +33,7 @@ router.get('/', getAllBookings);
 router.post('/walkin', authorizeRoles('ADMIN', 'SUPER_ADMIN', 'PATHOLOGIST', 'LAB_DEPARTMENT'), createWalkinBooking);
 router.post('/', strictLimiter, validateRequest(createBookingSchema), createBooking);
 router.post('/verify-payment', strictLimiter, verifyAndCreateBooking);
-router.patch('/:id/status', authorizeRoles('ADMIN', 'SUPER_ADMIN'), updateBookingStatus);
+router.patch('/:id/status', authorizeRoles('ADMIN', 'SUPER_ADMIN', 'EXECUTIVE', 'PATHOLOGY_PARTNER'), updateBookingStatus);
 router.patch('/:id/payment', authorizeRoles('ADMIN', 'SUPER_ADMIN', 'EXECUTIVE', 'PATHOLOGIST'), updatePaymentStatus);
 router.patch('/:id/assign-executive', authorizeRoles('ADMIN', 'SUPER_ADMIN'), assignExecutive);
 router.patch('/:id/assign-partner', authorizeRoles('ADMIN', 'SUPER_ADMIN'), assignPartner);
