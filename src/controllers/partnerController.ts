@@ -138,7 +138,7 @@ export const getPartnerNotifications = async (req: any, res: Response) => {
     const bookings = await prisma.booking.findMany({
       where: {
         collectionMode: 'HOME',
-        status: 'WAITING_FOR_PARTNER',
+        status: { in: ['WAITING_FOR_PARTNER', 'WAITING_FOR_ASSIGNMENT', 'PENDING'] },
         id: { notIn: excludedIds },
       },
       include: {
