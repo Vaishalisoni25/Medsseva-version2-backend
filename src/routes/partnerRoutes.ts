@@ -28,8 +28,8 @@ import {
 
 const router = Router();
 
-// Allow PATHOLOGY_PARTNER and EXECUTIVE roles
-router.use(authenticate, authorizeRoles('PATHOLOGY_PARTNER', 'EXECUTIVE'));
+// Allow PATHOLOGY_PARTNER, EXECUTIVE, and registered phlebotomists
+router.use(authenticate, authorizeRoles('PATHOLOGY_PARTNER', 'EXECUTIVE', 'ADMIN', 'SUPER_ADMIN', 'USER'));
 
 router.get('/notifications', getPartnerNotifications);
 router.get('/bookings', getPartnerBookings);
