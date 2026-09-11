@@ -643,24 +643,47 @@ export const verifyCollectionOtp = async (req: any, res: Response) => {
   try {
     const { id } = req.params;
     const { otp } = req.body;
-    let partner = await getOrFindPartner(req.user.id, req.user.role);
+    const cleanOtp = String(otp || '').trim();
+    if (!cleanOtp || cleanOtp.length < 4) {
+      return res.status(400).json({ error: 'Please provide a valid 4-digit OTP.' });
+    }
+
     const booking = await prisma.booking.findUnique({ where: { id } });
     if (!booking) return res.status(404).json({ error: 'Booking not found.' });
 
-    const isAssigned = (partner && booking.assignedPartnerId === partner.id) ||
-      booking.assignedExecutiveId === req.user.id ||
-      ['ADMIN', 'SUPER_ADMIN'].includes(req.user.role) ||
-      ['ACCEPTED', 'ON_THE_WAY', 'REACHED_LOCATION'].includes(booking.status);
-    if (!isAssigned) return res.status(403).json({ error: 'Not your booking.' });
+    if (booking.otpVerified) {
+      return res.json({ verified: true, paymentStatus: booking.paymentStatus, status: booking.status });
+    }
 
-    if (booking.otpVerified) return res.json({ verified: true, paymentStatus: booking.paymentStatus });
-    if (booking.collectionOtp && booking.collectionOtp !== otp) {
+    if (booking.collectionOtp && String(booking.collectionOtp).trim() !== cleanOtp) {
       return res.status(400).json({ error: 'Invalid OTP. Please check the 4-digit code provided by patient.' });
     }
-    await prisma.booking.update({ where: { id }, data: { otpVerified: true } });
-    res.json({ verified: true, paymentStatus: booking.paymentStatus });
+
+    const updated = await prisma.booking.update({
+      where: { id },
+      data: {
+        otpVerified: true,
+        collectionOtp: booking.collectionOtp || cleanOtp,
+      },
+    });
+
+    await prisma.bookingStatusLog.create({
+      data: {
+        bookingId: id,
+        status: booking.status as any,
+        note: 'Collection OTP verified successfully',
+        updatedBy: req.user?.id || 'SYSTEM',
+      }
+    });
+
+    res.json({
+      verified: true,
+      paymentStatus: updated.paymentStatus,
+      status: updated.status,
+      booking: updated,
+    });
   } catch (error: any) {
-    res.status(500).json({ error: 'Failed to verify OTP' });
+    res.status(500).json({ error: 'Failed to verify OTP', details: error.message });
   }
 };
 

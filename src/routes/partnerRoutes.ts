@@ -25,6 +25,7 @@ import {
   assignPartnerStaff,
   getPartnerBranchStaff,
 } from '../controllers/partnerController';
+import { verifyCollectionOtp, generateCollectionOtp } from '../controllers/bookingController';
 
 const router = Router();
 
@@ -38,6 +39,8 @@ router.patch('/bookings/:id/accept', acceptBooking);
 router.patch('/bookings/:id/assign-staff', assignPartnerStaff);
 router.patch('/bookings/:id/reject', rejectBooking);
 router.patch('/bookings/:id/status', updateBookingStatus);
+router.post('/bookings/:id/verify-otp', verifyCollectionOtp);
+router.get('/bookings/:id/collection-otp', generateCollectionOtp);
 router.post('/bookings/:id/collect-cash', collectCash);
 router.post('/bookings/:id/collect-upi', initiateUpiCollection);
 router.get('/bookings/:id/upi-status', checkUpiPaymentStatus);
