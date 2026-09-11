@@ -6,7 +6,7 @@ import { isWithinServiceRadius } from '../utils/geo.utils';
 
 export async function getOrFindPartner(userId: string, userRole?: string) {
   let partner = await prisma.pathologyPartner.findUnique({ where: { userId } });
-  if (!partner && (userRole === 'EXECUTIVE' || !userRole)) {
+  if (!partner) {
     const userRec = await prisma.user.findUnique({
       where: { id: userId },
       include: { adminUser: true }
@@ -15,14 +15,16 @@ export async function getOrFindPartner(userId: string, userRole?: string) {
       partner = await prisma.pathologyPartner.create({
         data: {
           userId: userRec.id,
-          labName: `${userRec.name} (Phlebotomist)`,
+          labName: `${userRec.name || 'Phlebotomist'} (Collector)`,
           role: 'PHLEBOTOMIST',
           approvalStatus: 'APPROVED',
           isAvailable: true,
           commissionRate: 30.0,
           branchId: userRec.adminUser?.branchId || undefined,
         }
-      }).catch(() => null);
+      }).catch(async () => {
+        return prisma.pathologyPartner.findUnique({ where: { userId } });
+      });
     }
   }
   return partner;
