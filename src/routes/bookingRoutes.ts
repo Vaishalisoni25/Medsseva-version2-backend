@@ -43,7 +43,7 @@ router.patch('/:id/patient-reached', authorizeRoles('USER', 'ADMIN', 'SUPER_ADMI
 router.patch('/:id/update-lab-status', authorizeRoles('ADMIN', 'SUPER_ADMIN', 'PATHOLOGIST'), updateLabStatus);
 router.patch('/:id/collect-sample', authorizeRoles('ADMIN', 'PATHOLOGIST', 'EXECUTIVE'), collectSample);
 router.get('/:id/collection-otp', generateCollectionOtp);
-router.post('/:id/verify-otp', authorizeRoles('PATHOLOGY_PARTNER', 'EXECUTIVE', 'ADMIN', 'SUPER_ADMIN'), verifyCollectionOtp);
+router.post('/:id/verify-otp', verifyCollectionOtp);
 router.post('/:id/send-invoice', authorizeRoles('ADMIN', 'SUPER_ADMIN', 'PATHOLOGIST'), sendBookingInvoice);
 
 export default router;

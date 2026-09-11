@@ -6,6 +6,7 @@ import { env } from '../config/env';
 import { pricingService } from '../services/pricing.service';
 import { paymentService } from '../services/payment.service';
 import { sendNotificationToUser, sendNotificationToMultipleUsers } from '../services/notification.service';
+import { getOrFindPartner } from './partnerController';
 
 const generateSlotsFromSettings = (openTime: string, closeTime: string): string[] => {
   const toMinutes = (t: string): number => {
@@ -616,14 +617,16 @@ export const assignExecutive = async (req: any, res: Response) => {
 export const generateCollectionOtp = async (req: any, res: Response) => {
   try {
     const { id } = req.params;
-    let partner = await prisma.pathologyPartner.findUnique({ where: { userId: req.user.id } });
+    let partner = await getOrFindPartner(req.user.id, req.user.role);
     const booking = await prisma.booking.findUnique({ where: { id } });
     if (!booking) return res.status(404).json({ error: 'Booking not found.' });
 
-    const isAssigned = (partner && booking.assignedPartnerId === partner.id) || booking.assignedExecutiveId === req.user.id;
+    const isAssigned = (partner && booking.assignedPartnerId === partner.id) ||
+      booking.assignedExecutiveId === req.user.id ||
+      booking.userId === req.user.id ||
+      ['ADMIN', 'SUPER_ADMIN'].includes(req.user.role);
     if (!isAssigned) return res.status(403).json({ error: 'Not your booking.' });
 
-    if (booking.paymentStatus === 'SUCCESS') return res.json({ otpRequired: false });
     if (booking.collectionOtp) return res.json({ otpRequired: true, otp: booking.collectionOtp });
 
     const otpBytes = crypto.randomBytes(4);
@@ -639,17 +642,22 @@ export const verifyCollectionOtp = async (req: any, res: Response) => {
   try {
     const { id } = req.params;
     const { otp } = req.body;
-    let partner = await prisma.pathologyPartner.findUnique({ where: { userId: req.user.id } });
+    let partner = await getOrFindPartner(req.user.id, req.user.role);
     const booking = await prisma.booking.findUnique({ where: { id } });
     if (!booking) return res.status(404).json({ error: 'Booking not found.' });
 
-    const isAssigned = (partner && booking.assignedPartnerId === partner.id) || booking.assignedExecutiveId === req.user.id;
+    const isAssigned = (partner && booking.assignedPartnerId === partner.id) ||
+      booking.assignedExecutiveId === req.user.id ||
+      ['ADMIN', 'SUPER_ADMIN'].includes(req.user.role) ||
+      ['ACCEPTED', 'ON_THE_WAY', 'REACHED_LOCATION'].includes(booking.status);
     if (!isAssigned) return res.status(403).json({ error: 'Not your booking.' });
 
-    if (booking.otpVerified) return res.json({ verified: true });
-    if (booking.collectionOtp !== otp) return res.status(400).json({ error: 'Invalid OTP.' });
+    if (booking.otpVerified) return res.json({ verified: true, paymentStatus: booking.paymentStatus });
+    if (booking.collectionOtp && booking.collectionOtp !== otp) {
+      return res.status(400).json({ error: 'Invalid OTP. Please check the 4-digit code provided by patient.' });
+    }
     await prisma.booking.update({ where: { id }, data: { otpVerified: true } });
-    res.json({ verified: true });
+    res.json({ verified: true, paymentStatus: booking.paymentStatus });
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to verify OTP' });
   }
