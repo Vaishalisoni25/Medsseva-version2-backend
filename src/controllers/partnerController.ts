@@ -248,7 +248,7 @@ export const acceptBooking = async (req: any, res: Response) => {
 
     const booking = await prisma.booking.findUnique({ where: { id } });
 
-    if (booking && booking.paymentStatus !== 'SUCCESS' && !booking.collectionOtp) {
+    if (booking && !booking.collectionOtp) {
       const otp = Math.floor(1000 + Math.random() * 9000).toString();
       await prisma.booking.update({
         where: { id },
