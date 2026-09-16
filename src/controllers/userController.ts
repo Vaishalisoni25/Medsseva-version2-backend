@@ -41,7 +41,23 @@ export const getMe = async (req: AuthRequest, res: Response) => {
       });
     }
 
-res.json({
+    const adminUser = await prisma.adminUser.findUnique({
+      where: { userId: user.id },
+      include: { branch: true, role: true }
+    });
+
+    const isEmployee = !!(
+      adminUser && (
+        adminUser.userType === 'EMPLOYEE' ||
+        adminUser.userType === 'STAFF' ||
+        adminUser.branchId ||
+        adminUser.role?.slug === 'executive' ||
+        (adminUser.designation && /phlebotomist|collector|phlebo/i.test(adminUser.designation)) ||
+        (adminUser.department && /phlebotom|sample collection/i.test(adminUser.department))
+      )
+    );
+
+    res.json({
       id: user.id,
       name: user.name,
       mobile: user.mobile,
@@ -55,6 +71,14 @@ res.json({
       bloodGroup: user.bloodGroup ?? null,
       altMobile: user.altMobile ?? null,
       familyMembers: user.familyMembers,
+      isEmployee,
+      phlebotomistType: isEmployee ? 'EMPLOYEE' : 'FREELANCER',
+      userType: adminUser?.userType || (isEmployee ? 'EMPLOYEE' : null),
+      branchId: adminUser?.branchId || null,
+      branchName: adminUser?.branch?.name || null,
+      designation: adminUser?.designation || null,
+      adminRole: adminUser?.role?.name || null,
+      adminRoleSlug: adminUser?.role?.slug || null,
     });
   } catch (error: any) {
     console.error('Error fetching user profile:', error);

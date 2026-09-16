@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/prisma';
 import { AuthRequest } from '../middlewares/authMiddleware';
+import { cloudinary } from '../config/cloudinary';
 
 export const getDoctors = async (req: AuthRequest, res: Response) => {
   try {
@@ -375,5 +376,39 @@ export const doctorDirectSampleHandover = async (req: AuthRequest, res: Response
   } catch (error: any) {
     console.error('Error registering direct sample handover:', error);
     res.status(500).json({ error: 'Failed to register sample handover', details: error.message });
+  }
+};
+
+export const uploadDoctorSignature = async (req: AuthRequest, res: Response) => {
+  try {
+    const file = req.file;
+    if (!file) {
+      return res.status(400).json({ error: 'No signature image file provided' });
+    }
+
+    const b64 = Buffer.from(file.buffer).toString('base64');
+    const dataURI = `data:${file.mimetype};base64,${b64}`;
+    const result = await cloudinary.uploader.upload(dataURI, {
+      folder: 'medseva/signatures',
+      resource_type: 'image',
+    });
+
+    const signatureUrl = result.secure_url;
+    const { doctorId } = req.body;
+    if (doctorId) {
+      await (prisma as any).doctor.update({
+        where: { id: doctorId },
+        data: { signatureUrl },
+      });
+    }
+
+    res.json({
+      success: true,
+      url: signatureUrl,
+      publicId: result.public_id,
+    });
+  } catch (error: any) {
+    console.error('Error uploading doctor signature:', error);
+    res.status(500).json({ error: 'Signature upload failed', details: error.message });
   }
 };

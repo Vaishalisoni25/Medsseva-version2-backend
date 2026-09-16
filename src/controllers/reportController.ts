@@ -153,8 +153,26 @@ export const getReportById = async (req: AuthRequest, res: Response) => {
     if (report.booking?.addressId) {
       address = await prisma.address.findUnique({ where: { id: report.booking.addressId } });
     }
+    let signatureUrl = (report as any).doctorSignatureUrl || null;
+    if (!signatureUrl && report.doctorName) {
+      const doc = await (prisma as any).doctor.findFirst({
+        where: {
+          OR: [
+            { name: { equals: report.doctorName, mode: 'insensitive' } },
+            ...((report as any).doctorRegNo ? [{ registrationNo: (report as any).doctorRegNo }] : []),
+          ],
+          signatureUrl: { not: null },
+        },
+        select: { signatureUrl: true },
+      });
+      if (doc?.signatureUrl) {
+        signatureUrl = doc.signatureUrl;
+      }
+    }
+
     const reportWithAddress = {
       ...report,
+      doctorSignatureUrl: signatureUrl,
       booking: report.booking ? {
         ...report.booking,
         address: address || report.booking.user?.addresses?.[0] || null,
@@ -174,6 +192,7 @@ export const createReport = async (req: AuthRequest, res: Response) => {
       bookingId, testName, clinicalNotes, technicianRemarks, doctorRemarks, internalNotes,
       parameters, recipientType, recipientId,
       reportBranchId, doctorName, doctorQualification, doctorRegNo, doctorDesignation, doctorVerifiedAt,
+      doctorSignatureUrl,
     } = req.body;
 
     const existing = await prisma.report.findUnique({ where: { bookingId } });
@@ -183,7 +202,7 @@ export const createReport = async (req: AuthRequest, res: Response) => {
 
     const hasAbnormal = parameters.some((p: any) => p.isAbnormal);
 
-    const report = await prisma.report.create({
+    const report = await (prisma as any).report.create({
       data: {
         bookingId,
         testName,
@@ -201,6 +220,7 @@ export const createReport = async (req: AuthRequest, res: Response) => {
         doctorRegNo: doctorRegNo || null,
         doctorDesignation: doctorDesignation || null,
         doctorVerifiedAt: doctorVerifiedAt ? new Date(doctorVerifiedAt) : null,
+        doctorSignatureUrl: doctorSignatureUrl || null,
         parameters: {
           create: parameters.map((p: any) => ({
             parameterId: p.parameterId || undefined,
@@ -234,6 +254,7 @@ export const updateReportDraft = async (req: AuthRequest, res: Response) => {
     const {
       clinicalNotes, technicianRemarks, doctorRemarks, internalNotes, parameters,
       reportBranchId, doctorName, doctorQualification, doctorRegNo, doctorDesignation, doctorVerifiedAt,
+      doctorSignatureUrl,
     } = req.body;
 
     const report = await prisma.report.findUnique({ where: { id } });
@@ -246,7 +267,7 @@ export const updateReportDraft = async (req: AuthRequest, res: Response) => {
 
     const hasAbnormal = parameters.some((p: any) => p.isAbnormal);
 
-    const updated = await prisma.report.update({
+    const updated = await (prisma as any).report.update({
       where: { id },
       data: {
         clinicalNotes,
@@ -260,6 +281,7 @@ export const updateReportDraft = async (req: AuthRequest, res: Response) => {
         doctorRegNo: doctorRegNo || null,
         doctorDesignation: doctorDesignation || null,
         doctorVerifiedAt: doctorVerifiedAt ? new Date(doctorVerifiedAt) : null,
+        ...(doctorSignatureUrl !== undefined ? { doctorSignatureUrl: doctorSignatureUrl || null } : {}),
         parameters: {
           create: parameters.map((p: any) => ({
             parameterId: p.parameterId || undefined,
