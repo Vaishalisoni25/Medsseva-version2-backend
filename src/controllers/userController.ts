@@ -225,19 +225,57 @@ export const deleteMe = async (req: AuthRequest, res: Response) => {
     const userId = req.user?.id;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
-    // Let Prisma handle cascaded deletions based on schema
-    await prisma.user.delete({
-      where: { id: userId }
+    // Check if user has active/ongoing bookings
+    const activeBookings = await prisma.booking.findMany({
+      where: {
+        userId,
+        status: { notIn: ['COMPLETED', 'CANCELLED', 'REJECTED'] }
+      }
     });
 
-    res.json({ success: true, message: 'Account deleted successfully' });
+    if (activeBookings.length > 0) {
+      return res.status(400).json({
+        error: `Cannot delete account while you have ${activeBookings.length} ongoing test booking(s). Please wait for completion or cancel bookings first.`
+      });
+    }
+
+    // Cleanly delete user and all associated child entities
+    await prisma.$transaction(async (tx) => {
+      // 1. Delete associated bookings and their tests/packages/logs/samples
+      const userBookings = await tx.booking.findMany({ where: { userId }, select: { id: true } });
+      const bookingIds = userBookings.map(b => b.id);
+      if (bookingIds.length > 0) {
+        await tx.bookingTest.deleteMany({ where: { bookingId: { in: bookingIds } } }).catch(() => {});
+        await tx.bookingPackage.deleteMany({ where: { bookingId: { in: bookingIds } } }).catch(() => {});
+        await tx.bookingStatusLog.deleteMany({ where: { bookingId: { in: bookingIds } } }).catch(() => {});
+        await tx.sampleDelivery.deleteMany({ where: { bookingId: { in: bookingIds } } }).catch(() => {});
+        await tx.sample.deleteMany({ where: { bookingId: { in: bookingIds } } }).catch(() => {});
+        await tx.report.deleteMany({ where: { bookingId: { in: bookingIds } } }).catch(() => {});
+        await tx.partnerRating.deleteMany({ where: { bookingId: { in: bookingIds } } }).catch(() => {});
+        await tx.referralCommission.deleteMany({ where: { bookingId: { in: bookingIds } } }).catch(() => {});
+        await tx.payment.deleteMany({ where: { bookingId: { in: bookingIds } } }).catch(() => {});
+        await tx.booking.deleteMany({ where: { id: { in: bookingIds } } });
+      }
+
+      // 2. Delete user's addresses, family members, payment methods, notifications, prescriptions
+      await tx.address.deleteMany({ where: { userId } }).catch(() => {});
+      await tx.family.deleteMany({ where: { userId } }).catch(() => {});
+      await tx.paymentMethod.deleteMany({ where: { userId } }).catch(() => {});
+      await tx.upiMethod.deleteMany({ where: { userId } }).catch(() => {});
+      await tx.prescription.deleteMany({ where: { userId } }).catch(() => {});
+      await tx.notification.deleteMany({ where: { userId } }).catch(() => {});
+      await tx.doctor.deleteMany({ where: { userId } }).catch(() => {});
+      await tx.pathologyPartner.deleteMany({ where: { userId } }).catch(() => {});
+      await tx.adminUser.deleteMany({ where: { userId } }).catch(() => {});
+
+      // 3. Delete user record
+      await tx.user.delete({ where: { id: userId } });
+    });
+
+    res.json({ success: true, message: 'Your account and data have been permanently deleted.' });
   } catch (error: any) {
     console.error('Error deleting account:', error);
-    // If Prisma throws a foreign key constraint error due to lack of cascade in schema
-    if (error.code === 'P2003') {
-      return res.status(400).json({ error: 'Cannot delete account because there are active bookings or records tied to it. Please contact support.' });
-    }
-    res.status(500).json({ error: 'Failed to delete account', details: error.message });
+    res.status(500).json({ error: 'Failed to delete account. Please try again.', details: error.message });
   }
 };
 

@@ -293,11 +293,28 @@ export const finalizeReport = async (req: AuthRequest, res: Response) => {
 
     if (!req.user?.id) return res.status(401).json({ error: 'Unauthorized' });
 
+    // Only Super Admin or Branch Admin can approve/finalize reports
+    const isSuperAdmin = req.user.isSuperAdmin || req.user.role === 'SUPER_ADMIN';
+    const isAdmin = req.user.role === 'ADMIN';
+
+    if (!isSuperAdmin && !isAdmin) {
+      return res.status(403).json({ error: 'Forbidden: Only Super Admin or Branch Admin can approve reports' });
+    }
+
     const report = await prisma.report.findUnique({
       where: { id },
-      include: { parameters: true },
+      include: { parameters: true, booking: true },
     });
     if (!report) return res.status(404).json({ error: 'Report not found' });
+
+    // Branch Admin boundary check: if user has a branch assigned, ensure they only approve reports for their branch
+    if (!isSuperAdmin && req.user.branchId) {
+      const reportBranch = report.reportBranchId || report.booking?.branchId;
+      if (reportBranch && reportBranch !== req.user.branchId) {
+        return res.status(403).json({ error: 'Forbidden: Branch Admin can only approve reports for their branch' });
+      }
+    }
+
     if (report.parameters.length === 0) {
       return res.status(400).json({ error: 'Cannot finalize a report with no parameters entered' });
     }

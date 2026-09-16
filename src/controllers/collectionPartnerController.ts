@@ -4,8 +4,19 @@ import { triggerApprovalNotification } from '../services/notification.service';
 
 export const getCollectionPartnersSummary = async (req: Request, res: Response) => {
   try {
+    const { branchId, labId } = req.query;
+    const targetBranchId = (branchId || labId) as string;
+
     const executives = await prisma.user.findMany({
-      where: { role: 'EXECUTIVE' },
+      where: {
+        role: 'EXECUTIVE',
+        ...(targetBranchId && targetBranchId !== 'ALL' && targetBranchId !== 'all' ? {
+          OR: [
+            { adminUser: { branchId: targetBranchId } },
+            { pathologyPartner: { branchId: targetBranchId } }
+          ]
+        } : {})
+      },
       include: { adminUser: true }
     });
 
@@ -16,13 +27,14 @@ export const getCollectionPartnersSummary = async (req: Request, res: Response) 
     const bookings = await prisma.booking.findMany({
       where: {
         assignedExecutiveId: { in: executives.map(e => e.id) },
-        status: { in: ['COMPLETED', 'DELIVERED_TO_LAB', 'REPORT_READY', 'SAMPLE_COLLECTED'] }
+        status: { in: ['COMPLETED', 'DELIVERED_TO_LAB', 'REPORT_READY', 'SAMPLE_COLLECTED'] },
+        ...(targetBranchId && targetBranchId !== 'ALL' && targetBranchId !== 'all' ? { branchId: targetBranchId } : {})
       }
     });
 
     const totalCollections = bookings.length;
-    const totalCommission = bookings.reduce((sum, b) => sum + (b.totalPaid * 0.15), 0);
-    const totalWalletBalance = totalCommission * 0.8;
+    const totalCommission = bookings.reduce((sum, b) => sum + ((b.totalPaid || 0) * 0.30), 0);
+    const totalWalletBalance = totalCommission;
 
     res.json({
       totalPartners,
@@ -40,14 +52,24 @@ export const getCollectionPartnersSummary = async (req: Request, res: Response) 
 
 export const getCollectionPartners = async (req: Request, res: Response) => {
   try {
-    const { search, labId, status } = req.query;
+    const { search, labId, branchId, status } = req.query;
+    const targetBranchId = (branchId || labId) as string;
 
     const executives = await prisma.user.findMany({
-      where: { role: 'EXECUTIVE' },
+      where: {
+        role: 'EXECUTIVE',
+        ...(targetBranchId && targetBranchId !== 'ALL' && targetBranchId !== 'all' ? {
+          OR: [
+            { adminUser: { branchId: targetBranchId } },
+            { pathologyPartner: { branchId: targetBranchId } }
+          ]
+        } : {})
+      },
       include: {
         adminUser: {
           include: { branch: true }
-        }
+        },
+        pathologyPartner: true
       },
       orderBy: { createdAt: 'desc' }
     });
@@ -60,14 +82,20 @@ export const getCollectionPartners = async (req: Request, res: Response) => {
 
       const totalSamples = executiveBookings.length;
       const totalTestValue = executiveBookings.reduce((sum, b) => sum + (b.totalPaid || 0), 0);
-      const commissionRate = 15;
+      const commissionRate = e.pathologyPartner?.commissionRate ?? 30.0;
       const totalCommissionEarned = Math.round(totalTestValue * (commissionRate / 100));
       const walletBalance = totalCommissionEarned;
 
       const adminUser = e.adminUser;
-      const isApproved = adminUser ? adminUser.isActive : false;
-      const currentStatus = isApproved ? 'APPROVED' : 'PENDING';
+      const partner = e.pathologyPartner;
+      let currentStatus = 'PENDING';
+      if (partner?.approvalStatus) {
+        currentStatus = partner.approvalStatus;
+      } else if (adminUser?.isActive) {
+        currentStatus = 'APPROVED';
+      }
       const branch = adminUser?.branch || null;
+      const isAvailable = currentStatus === 'APPROVED' && (partner ? partner.isAvailable : true);
 
       return {
         id: e.id,
@@ -78,14 +106,14 @@ export const getCollectionPartners = async (req: Request, res: Response) => {
         avatarUrl: e.avatarUrl || null,
         registrationDate: e.createdAt.toISOString(),
         status: currentStatus,
-        isAvailable: true,
+        isAvailable,
         partnerCode: `PHLEBO-${e.id.slice(0, 5).toUpperCase()}`,
-        labName: `${e.name} (Collection Partner)`,
+        labName: `${e.name} (Freelance Phlebotomist)`,
         role: 'PHLEBOTOMIST',
         address: adminUser?.department || 'Independent',
         assignedLab: branch ? { id: branch.id, name: branch.name, city: branch.city } : null,
         commissionRate,
-        paymentCycle: 'WEEKLY',
+        paymentCycle: partner?.paymentCycle || 'WEEKLY',
         totalSamplesCollected: totalSamples,
         totalTestValue,
         totalCommissionEarned,
@@ -124,7 +152,10 @@ export const getCollectionPartnerDetails = async (req: Request, res: Response) =
 
     const user = await prisma.user.findFirst({
       where: { id, role: 'EXECUTIVE' },
-      include: { adminUser: { include: { branch: true } } }
+      include: {
+        adminUser: { include: { branch: true } },
+        pathologyPartner: true
+      }
     });
 
     if (!user) {
@@ -143,9 +174,11 @@ export const getCollectionPartnerDetails = async (req: Request, res: Response) =
       orderBy: { createdAt: 'desc' }
     });
 
+    const partnerCommissionRate = user.pathologyPartner?.commissionRate ?? 30.0;
+
     const collectionsHistory = bookings.map(b => {
       const testName = b.tests.map(t => t.test.name).concat(b.packages.map(p => p.package.name)).join(', ') || 'Diagnostic Test';
-      const commissionRate = 15;
+      const commissionRate = partnerCommissionRate;
       const commissionAmount = Math.round((b.totalPaid || 0) * (commissionRate / 100));
 
       return {
@@ -177,9 +210,21 @@ export const getCollectionPartnerDetails = async (req: Request, res: Response) =
     });
 
     const adminUser = user.adminUser;
+    const partner = user.pathologyPartner;
+    let currentStatus = 'PENDING';
+    if (partner?.approvalStatus) {
+      currentStatus = partner.approvalStatus;
+    } else if (adminUser?.isActive) {
+      currentStatus = 'APPROVED';
+    }
     const branch = adminUser?.branch || null;
+    const isAvailable = currentStatus === 'APPROVED' && (partner ? partner.isAvailable : true);
 
-    res.json({
+    const totalSamples = collectionsHistory.length;
+    const totalTestValue = collectionsHistory.reduce((sum, c) => sum + (c.testAmount || 0), 0);
+    const totalCommissionEarned = collectionsHistory.reduce((sum, c) => sum + (c.commissionAmount || 0), 0);
+
+    const partnerData = {
       id: user.id,
       userId: user.id,
       name: user.name,
@@ -187,15 +232,27 @@ export const getCollectionPartnerDetails = async (req: Request, res: Response) =
       email: user.email || '',
       avatarUrl: user.avatarUrl || null,
       registrationDate: user.createdAt.toISOString(),
-      status: adminUser?.isActive ? 'APPROVED' : 'PENDING',
-      isAvailable: true,
+      status: currentStatus,
+      isAvailable,
       partnerCode: `PHLEBO-${user.id.slice(0, 5).toUpperCase()}`,
-      labName: `${user.name} (Collection Partner)`,
+      labName: `${user.name} (Freelance Phlebotomist)`,
       role: 'PHLEBOTOMIST',
       address: adminUser?.department || 'Independent',
       assignedLab: branch ? { id: branch.id, name: branch.name, city: branch.city } : null,
-      commissionRate: 15,
-      paymentCycle: 'WEEKLY',
+      commissionRate: partnerCommissionRate,
+      paymentCycle: partner?.paymentCycle || 'WEEKLY',
+      totalSamplesCollected: totalSamples,
+      totalTestValue,
+      totalCommissionEarned,
+      totalWalletCredits: totalCommissionEarned,
+      walletBalance: totalCommissionEarned,
+    };
+
+    res.json({
+      partner: partnerData,
+      collections: collectionsHistory,
+      labWiseSummary: [],
+      ...partnerData,
       collectionsHistory,
     });
   } catch (error: any) {
@@ -206,10 +263,14 @@ export const getCollectionPartnerDetails = async (req: Request, res: Response) =
 
 export const getDailyCollectionSummary = async (req: Request, res: Response) => {
   try {
+    const { branchId, labId } = req.query;
+    const targetBranchId = (branchId || labId) as string;
+
     const bookings = await prisma.booking.findMany({
       where: {
         assignedExecutiveId: { not: null },
-        status: { in: ['COMPLETED', 'DELIVERED_TO_LAB', 'REPORT_READY', 'SAMPLE_COLLECTED'] }
+        status: { in: ['COMPLETED', 'DELIVERED_TO_LAB', 'REPORT_READY', 'SAMPLE_COLLECTED'] },
+        ...(targetBranchId && targetBranchId !== 'ALL' && targetBranchId !== 'all' ? { branchId: targetBranchId } : {})
       },
       orderBy: { createdAt: 'asc' }
     });
@@ -221,7 +282,7 @@ export const getDailyCollectionSummary = async (req: Request, res: Response) => 
       const existing = dailyMap.get(dateStr) || { collections: 0, totalAmount: 0, totalCommission: 0 };
       existing.collections += 1;
       existing.totalAmount += b.totalPaid || 0;
-      existing.totalCommission += Math.round((b.totalPaid || 0) * 0.15);
+      existing.totalCommission += Math.round((b.totalPaid || 0) * 0.30);
       dailyMap.set(dateStr, existing);
     });
 
@@ -239,7 +300,12 @@ export const getDailyCollectionSummary = async (req: Request, res: Response) => 
 
 export const getLabWiseCollections = async (req: Request, res: Response) => {
   try {
-    const branches = await prisma.branch.findMany();
+    const { branchId, labId } = req.query;
+    const targetBranchId = (branchId || labId) as string;
+
+    const branches = await prisma.branch.findMany({
+      where: targetBranchId && targetBranchId !== 'ALL' && targetBranchId !== 'all' ? { id: targetBranchId } : undefined
+    });
     const result = await Promise.all(branches.map(async b => {
       const bookings = await prisma.booking.findMany({
         where: { branchId: b.id, assignedExecutiveId: { not: null } },
@@ -247,7 +313,7 @@ export const getLabWiseCollections = async (req: Request, res: Response) => {
       });
       const samples = bookings.length;
       const totalTestValue = bookings.reduce((sum, bk) => sum + (bk.totalPaid || 0), 0);
-      const collectionCommission = Math.round(totalTestValue * 0.15);
+      const collectionCommission = Math.round(totalTestValue * 0.30);
 
       return {
         labId: b.id,
@@ -301,6 +367,35 @@ export const updateCollectionPartnerStatus = async (req: Request, res: Response)
           ...(branchId ? { branchId } : {})
         }
       });
+    }
+
+    // Also sync PathologyPartner record
+    const existingPartner = await prisma.pathologyPartner.findUnique({ where: { userId: id } });
+    if (existingPartner) {
+      await prisma.pathologyPartner.update({
+        where: { userId: id },
+        data: {
+          approvalStatus,
+          isAvailable: isActive,
+          commissionRate: 30.0,
+          ...(branchId ? { branchId } : {})
+        }
+      });
+    } else {
+      const userRec = await prisma.user.findUnique({ where: { id } });
+      if (userRec) {
+        await prisma.pathologyPartner.create({
+          data: {
+            userId: id,
+            labName: `${userRec.name} (Freelance Phlebotomist)`,
+            role: 'PHLEBOTOMIST',
+            approvalStatus,
+            isAvailable: isActive,
+            commissionRate: 30.0,
+            branchId: branchId || undefined,
+          }
+        }).catch(console.error);
+      }
     }
 
     if (isActive) {

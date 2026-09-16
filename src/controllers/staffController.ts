@@ -144,13 +144,26 @@ export const createStaff = async (req: AuthRequest, res: Response) => {
     const isSuperAdmin = req.user?.isSuperAdmin || (req.user?.role || '').toUpperCase() === 'SUPER_ADMIN';
     const targetBranchId = branchId || (!isSuperAdmin ? req.user?.branchId : null) || null;
 
+    const isPhlebo =
+      (designation && /phlebotomist|collector|phlebo/i.test(designation)) ||
+      (department && /phlebotom|sample collection/i.test(department));
+
     // Find a valid role for staff
     let effectiveRoleId = roleId;
     let role = null;
     if (effectiveRoleId) {
       role = await prisma.adminRole.findUnique({ where: { id: effectiveRoleId } });
     }
-    if (!role) {
+    if (isPhlebo) {
+      let execRole = await prisma.adminRole.findFirst({ where: { slug: 'executive' } });
+      if (!execRole) {
+        execRole = await prisma.adminRole.create({
+          data: { name: 'Executive', slug: 'executive', description: 'Sample Collection Executive / Phlebotomist', isSystem: true }
+        });
+      }
+      role = execRole;
+      effectiveRoleId = execRole.id;
+    } else if (!role) {
       role = await prisma.adminRole.findFirst({
         where: {
           slug: { in: ['staff', 'employee', 'lab_department', 'executive', 'admin'] },
@@ -174,13 +187,15 @@ export const createStaff = async (req: AuthRequest, res: Response) => {
       }
     }
 
+    const userRole = isPhlebo ? 'EXECUTIVE' : 'ADMIN';
+
     const user = await prisma.user.create({
       data: {
         name: name.trim(),
         email: cleanEmail,
         mobile: cleanMobile,
         password: hashedPassword,
-        role: 'ADMIN',
+        role: userRole,
       },
     });
 
@@ -189,10 +204,10 @@ export const createStaff = async (req: AuthRequest, res: Response) => {
         userId: user.id,
         roleId: effectiveRoleId,
         franchiseId: franchiseId || null,
-        department: department || 'Pathology Lab',
-        designation: designation || 'Lab Technician',
+        department: department || (isPhlebo ? 'Sample Collection (Phlebotomy)' : 'Pathology Lab'),
+        designation: designation || (isPhlebo ? 'Phlebotomist / Sample Collector' : 'Lab Technician'),
         branchId: targetBranchId,
-        userType: userType || 'EMPLOYEE',
+        userType: isPhlebo ? 'STAFF' : (userType || 'EMPLOYEE'),
         isActive: true,
       },
       include: {
@@ -222,6 +237,31 @@ export const createStaff = async (req: AuthRequest, res: Response) => {
         },
       },
     });
+
+    if (isPhlebo) {
+      await prisma.pathologyPartner.upsert({
+        where: { userId: user.id },
+        update: {
+          labName: `${user.name} (Phlebotomist)`,
+          role: 'PHLEBOTOMIST',
+          approvalStatus: 'APPROVED',
+          isAvailable: true,
+          branchId: targetBranchId,
+        },
+        create: {
+          userId: user.id,
+          labName: `${user.name} (Phlebotomist)`,
+          role: 'PHLEBOTOMIST',
+          partnerCode: `PHLEBO-${user.id.slice(0, 5).toUpperCase()}`,
+          address: department || 'Sample Collection (Phlebotomy)',
+          approvalStatus: 'APPROVED',
+          commissionRate: 15,
+          paymentCycle: 'WEEKLY',
+          isAvailable: true,
+          branchId: targetBranchId,
+        },
+      }).catch(err => console.warn('Pathology partner creation for phlebotomist staff non-fatal:', err.message));
+    }
 
     console.log('[CREATE STAFF] Success! Registered staff:', staff.id, 'Branch:', targetBranchId);
     res.status(201).json(staff);
@@ -297,6 +337,42 @@ export const updateStaff = async (req: AuthRequest, res: Response) => {
         branch: true,
       },
     });
+
+    const isPhlebo =
+      (designation && /phlebotomist|collector|phlebo/i.test(designation)) ||
+      (department && /phlebotom|sample collection/i.test(department)) ||
+      (existingStaff.designation && /phlebotomist|collector|phlebo/i.test(existingStaff.designation)) ||
+      (existingStaff.department && /phlebotom|sample collection/i.test(existingStaff.department));
+
+    if (isPhlebo) {
+      if (existingStaff.user?.role !== 'EXECUTIVE') {
+        await prisma.user.update({
+          where: { id: existingStaff.userId },
+          data: { role: 'EXECUTIVE' },
+        }).catch(console.error);
+      }
+
+      await prisma.pathologyPartner.upsert({
+        where: { userId: existingStaff.userId },
+        update: {
+          approvalStatus: isActive === false ? 'SUSPENDED' : 'APPROVED',
+          isAvailable: isActive !== false,
+          branchId: branchId || undefined,
+        },
+        create: {
+          userId: existingStaff.userId,
+          labName: `${existingStaff.user.name} (Phlebotomist)`,
+          role: 'PHLEBOTOMIST',
+          partnerCode: `PHLEBO-${existingStaff.userId.slice(0, 5).toUpperCase()}`,
+          address: department || existingStaff.department || 'Sample Collection (Phlebotomy)',
+          approvalStatus: isActive === false ? 'SUSPENDED' : 'APPROVED',
+          commissionRate: 15,
+          paymentCycle: 'WEEKLY',
+          isAvailable: isActive !== false,
+          branchId: branchId || undefined,
+        },
+      }).catch(console.error);
+    }
 
     res.json(updated);
   } catch (error: any) {

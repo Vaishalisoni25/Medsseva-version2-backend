@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/prisma';
 import { AuthRequest } from '../middlewares/authMiddleware';
 
@@ -110,6 +111,8 @@ export const createDoctor = async (req: AuthRequest, res: Response) => {
       cityId,
       partnerId,
       userId,
+      approvalStatus = 'PENDING',
+      isActive = false,
     } = req.body;
 
     if (!name || !qualification || !registrationNo) {
@@ -131,7 +134,8 @@ export const createDoctor = async (req: AuthRequest, res: Response) => {
         cityId: cityId || null,
         partnerId: partnerId || null,
         userId: userId || null,
-        isActive: true,
+        approvalStatus,
+        isActive,
       },
       include: { branch: true },
     });
@@ -159,6 +163,10 @@ export const updateDoctor = async (req: AuthRequest, res: Response) => {
       partnerId,
       isActive,
       approvalStatus,
+      rejectionReason,
+      commissionRate,
+      paymentCycle,
+      password,
     } = req.body;
 
     const data: any = {};
@@ -174,12 +182,43 @@ export const updateDoctor = async (req: AuthRequest, res: Response) => {
     if (partnerId !== undefined) data.partnerId = partnerId;
     if (isActive !== undefined) data.isActive = isActive;
     if (approvalStatus !== undefined) data.approvalStatus = approvalStatus;
+    if (rejectionReason !== undefined) data.rejectionReason = rejectionReason;
+    if (commissionRate !== undefined) data.commissionRate = Number(commissionRate);
+    if (paymentCycle !== undefined) data.paymentCycle = paymentCycle;
+
+    if (password) {
+      const hashedPassword = await bcrypt.hash(password, 10);
+      data.password = hashedPassword;
+    }
 
     const doctor = await (prisma as any).doctor.update({
       where: { id },
       data,
       include: { branch: true },
     });
+
+    if (doctor.userId) {
+      const userUpdates: any = {};
+      if (name !== undefined) userUpdates.name = name;
+      if (password) {
+        userUpdates.password = data.password;
+      }
+      if (isActive !== undefined) {
+        userUpdates.isActive = isActive;
+      }
+      if (Object.keys(userUpdates).length > 0) {
+        await prisma.user.update({
+          where: { id: doctor.userId },
+          data: userUpdates,
+        }).catch(console.error);
+      }
+      if (isActive !== undefined) {
+        await prisma.adminUser.updateMany({
+          where: { userId: doctor.userId },
+          data: { isActive },
+        }).catch(console.error);
+      }
+    }
 
     res.json(doctor);
   } catch (error: any) {
@@ -208,10 +247,20 @@ export const createDoctorSamplePickupRequest = async (req: AuthRequest, res: Res
     if (!doctorUserId) {
       return res.status(401).json({ error: 'Unauthorized Doctor request' });
     }
-    const { patientName, patientMobile, patientAge, patientGender, testIds, address, latitude, longitude, notes } = req.body;
+    const { patientName, patientMobile, patientAge, patientGender, testIds = [], address, latitude, longitude, notes } = req.body;
 
     if (!patientName || !patientMobile) {
       return res.status(400).json({ error: 'Patient name and mobile are required for sample pickup request' });
+    }
+
+    const doctor = await (prisma as any).doctor.findFirst({
+      where: { OR: [{ userId: doctorUserId }, { id: doctorUserId }] },
+    });
+
+    let totalBilled = 0;
+    if (Array.isArray(testIds) && testIds.length > 0) {
+      const tests = await prisma.test.findMany({ where: { id: { in: testIds } } });
+      totalBilled = tests.reduce((sum, t) => sum + (t.price || 0), 0);
     }
 
     const bookingCode = `DOC-PU-${Date.now().toString().slice(-6)}`;
@@ -221,17 +270,27 @@ export const createDoctorSamplePickupRequest = async (req: AuthRequest, res: Res
       data: {
         bookingCode,
         userId: doctorUserId,
+        referringDoctorId: doctor?.id || null,
+        branchId: doctor?.branchId || null,
         patientName,
         patientMobile,
         patientAge: patientAge ? Number(patientAge) : null,
         patientGender: patientGender || null,
         scheduledDate: new Date(),
         scheduledSlot: 'ASAP Pickup',
-        totalPaid: 0,
+        totalPaid: totalBilled,
         collectionMode: 'HOME',
         status: 'WAITING_FOR_PARTNER',
         partnerNote: notes ? `Doctor Pickup Request: ${notes}` : 'Doctor Clinic Sample Pickup Request',
         addressId: address || 'Doctor Clinic Location',
+        ...(Array.isArray(testIds) && testIds.length > 0 ? {
+          tests: {
+            create: testIds.map((tid: string) => ({ testId: tid }))
+          }
+        } : {})
+      },
+      include: {
+        tests: { include: { test: true } }
       }
     });
 
@@ -251,10 +310,20 @@ export const doctorDirectSampleHandover = async (req: AuthRequest, res: Response
     if (!doctorUserId) {
       return res.status(401).json({ error: 'Unauthorized Doctor request' });
     }
-    const { targetBranchId, patientName, patientMobile, sampleType, notes } = req.body;
+    const { targetBranchId, patientName, patientMobile, patientAge, patientGender, testIds = [], sampleType, notes } = req.body;
 
     if (!targetBranchId || !patientName) {
       return res.status(400).json({ error: 'Target branch ID and patient name are required' });
+    }
+
+    const doctor = await (prisma as any).doctor.findFirst({
+      where: { OR: [{ userId: doctorUserId }, { id: doctorUserId }] },
+    });
+
+    let totalBilled = 0;
+    if (Array.isArray(testIds) && testIds.length > 0) {
+      const tests = await prisma.test.findMany({ where: { id: { in: testIds } } });
+      totalBilled = tests.reduce((sum, t) => sum + (t.price || 0), 0);
     }
 
     const bookingCode = `DOC-HO-${Date.now().toString().slice(-6)}`;
@@ -263,16 +332,27 @@ export const doctorDirectSampleHandover = async (req: AuthRequest, res: Response
       data: {
         bookingCode,
         userId: doctorUserId,
+        referringDoctorId: doctor?.id || null,
         patientName,
         patientMobile: patientMobile || null,
+        patientAge: patientAge ? Number(patientAge) : null,
+        patientGender: patientGender || null,
         scheduledDate: new Date(),
         scheduledSlot: 'Direct Handover',
-        totalPaid: 0,
+        totalPaid: totalBilled,
         collectionMode: 'LAB',
         branchId: targetBranchId,
         status: 'DELIVERED_TO_LAB',
         partnerNote: notes ? `Doctor Direct Handover: ${notes}` : 'Direct Doctor Sample Handover',
         addressId: 'Direct Lab Handover',
+        ...(Array.isArray(testIds) && testIds.length > 0 ? {
+          tests: {
+            create: testIds.map((tid: string) => ({ testId: tid }))
+          }
+        } : {})
+      },
+      include: {
+        tests: { include: { test: true } }
       }
     });
 
@@ -284,18 +364,16 @@ export const doctorDirectSampleHandover = async (req: AuthRequest, res: Response
         sampleType: sampleType || 'Blood / Serum',
         receivedById: doctorUserId,
         notes: notes || 'Handed over directly by Doctor',
-        status: 'RECEIVED',
-        branchId: targetBranchId,
       }
     });
 
     res.status(201).json({
-      message: 'Sample handed over to target lab branch successfully',
+      message: 'Direct sample handover registered. Sample marked as delivered to lab.',
       booking,
       sample
     });
   } catch (error: any) {
-    console.error('Error in doctorDirectSampleHandover:', error);
-    res.status(500).json({ error: 'Failed to complete direct sample handover', details: error.message });
+    console.error('Error registering direct sample handover:', error);
+    res.status(500).json({ error: 'Failed to register sample handover', details: error.message });
   }
 };

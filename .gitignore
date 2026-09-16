@@ -67,3 +67,14 @@ public/uploads/
 
 # Misc
 *.local
+
+# Database & Cloud Configs
+.neon
+
+# Agent & AI Tooling
+.agents/
+skills-lock.json
+
+# Scratch & Temporary Scripts
+fix-orphan-bookings.ts
+env.example

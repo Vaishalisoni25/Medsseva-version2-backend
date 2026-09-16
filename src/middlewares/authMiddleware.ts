@@ -30,7 +30,7 @@ export const authenticate = async (req: AuthRequest, res: Response, next: NextFu
     let branchId: string | null = null;
     let partnerId: string | null = null;
 
-    const [adminUser, userRecord] = await Promise.all([
+    const [adminUser, userRecord, partnerRecord] = await Promise.all([
       prisma.adminUser.findUnique({
         where: { userId: decoded.id },
         include: {
@@ -44,6 +44,9 @@ export const authenticate = async (req: AuthRequest, res: Response, next: NextFu
       prisma.user.findUnique({
         where: { id: decoded.id },
         select: { role: true, email: true },
+      }),
+      prisma.pathologyPartner.findUnique({
+        where: { userId: decoded.id },
       }),
     ]);
 
@@ -60,9 +63,18 @@ export const authenticate = async (req: AuthRequest, res: Response, next: NextFu
       permissions = ['*'];
     }
 
-    const effectiveRole = isSuperAdmin || userRecord?.role === 'SUPER_ADMIN' || decoded.role === 'SUPER_ADMIN'
+    if (partnerRecord) {
+      partnerId = partnerRecord.id;
+      if (partnerRecord.branchId) branchId = partnerRecord.branchId;
+    }
+
+    let effectiveRole = isSuperAdmin || userRecord?.role === 'SUPER_ADMIN' || decoded.role === 'SUPER_ADMIN'
       ? 'SUPER_ADMIN'
       : (isAdmin ? 'ADMIN' : (userRecord?.role || decoded.role || 'USER'));
+
+    if (partnerRecord && (effectiveRole === 'USER' || !effectiveRole)) {
+      effectiveRole = partnerRecord.role === 'PHLEBOTOMIST' ? 'EXECUTIVE' : 'PATHOLOGY_PARTNER';
+    }
 
     console.log(`\x1b[36m[AUTH]\x1b[0m ${req.method} ${req.originalUrl} | User: ${userRecord?.email || decoded.id} | Role: ${effectiveRole}`);
 

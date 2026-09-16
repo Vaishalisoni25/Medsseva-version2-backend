@@ -23,19 +23,24 @@ import {
   confirmBranchDelivery,
   getDeliveryBranches,
   assignPartnerStaff,
+  getPartnerBranchStaff,
 } from '../controllers/partnerController';
+import { verifyCollectionOtp, generateCollectionOtp } from '../controllers/bookingController';
 
 const router = Router();
 
-// Allow PATHOLOGY_PARTNER and EXECUTIVE roles
-router.use(authenticate, authorizeRoles('PATHOLOGY_PARTNER', 'EXECUTIVE'));
+// Allow PATHOLOGY_PARTNER, EXECUTIVE, and registered phlebotomists
+router.use(authenticate, authorizeRoles('PATHOLOGY_PARTNER', 'EXECUTIVE', 'ADMIN', 'SUPER_ADMIN', 'USER'));
 
 router.get('/notifications', getPartnerNotifications);
 router.get('/bookings', getPartnerBookings);
+router.get('/branch-staff', getPartnerBranchStaff);
 router.patch('/bookings/:id/accept', acceptBooking);
 router.patch('/bookings/:id/assign-staff', assignPartnerStaff);
 router.patch('/bookings/:id/reject', rejectBooking);
 router.patch('/bookings/:id/status', updateBookingStatus);
+router.post('/bookings/:id/verify-otp', verifyCollectionOtp);
+router.get('/bookings/:id/collection-otp', generateCollectionOtp);
 router.post('/bookings/:id/collect-cash', collectCash);
 router.post('/bookings/:id/collect-upi', initiateUpiCollection);
 router.get('/bookings/:id/upi-status', checkUpiPaymentStatus);
@@ -51,6 +56,7 @@ router.get('/branch', getPartnerBranch);
 router.get('/ratings', getPartnerRatings);
 router.get('/delivery-branches', getDeliveryBranches);
 router.post('/bookings/:id/select-branch', selectDeliveryBranch);
+router.post('/bookings/:id/confirm-delivery', confirmBranchDelivery);
 import { documentUpload } from '../middlewares/upload';
 import {
   uploadPartnerOnboardingDocument,

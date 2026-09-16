@@ -28,7 +28,7 @@ router.get('/:id', authenticate, getReportById);
 router.post('/', authenticate, authorizeRoles('ADMIN', 'PATHOLOGIST', 'SUPER_ADMIN'), createReport);
 router.patch('/:id/draft', authenticate, authorizeRoles('ADMIN', 'PATHOLOGIST', 'SUPER_ADMIN'), updateReportDraft);
 router.patch('/:id/verify', authenticate, authorizeRoles('ADMIN', 'PATHOLOGIST', 'SUPER_ADMIN'), verifyReport);
-router.patch('/:id/finalize', authenticate, authorizeRoles('ADMIN', 'PATHOLOGIST', 'SUPER_ADMIN'), finalizeReport);
+router.patch('/:id/finalize', authenticate, authorizeRoles('ADMIN', 'SUPER_ADMIN'), finalizeReport);
 router.patch('/:id/send', authenticate, authorizeRoles('ADMIN', 'PATHOLOGIST', 'SUPER_ADMIN'), sendReport);
 router.patch('/:id/pdf-url', authenticate, authorizeRoles('ADMIN', 'PATHOLOGIST', 'SUPER_ADMIN'), savePdfUrl);
 router.post('/:id/upload-pdf', authenticate, authorizeRoles('ADMIN', 'PATHOLOGIST', 'SUPER_ADMIN'), upload.single('pdf'), uploadReportPdf);

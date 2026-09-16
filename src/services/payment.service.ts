@@ -235,6 +235,7 @@ export class PaymentService {
           status: safeCollectionMode === 'HOME' ? 'WAITING_FOR_PARTNER' : 'WAITING_FOR_ASSIGNMENT',
           paymentStatus: 'SUCCESS',
           collectionMode: safeCollectionMode as any,
+          collectionOtp: safeCollectionMode === 'HOME' ? Math.floor(1000 + Math.random() * 9000).toString() : null,
           addressId: finalAddressId,
           branchId: finalBranchId,
           paymentMode: 'UPI',

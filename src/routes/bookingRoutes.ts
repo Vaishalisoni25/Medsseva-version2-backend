@@ -33,7 +33,7 @@ router.get('/', getAllBookings);
 router.post('/walkin', authorizeRoles('ADMIN', 'SUPER_ADMIN', 'PATHOLOGIST', 'LAB_DEPARTMENT'), createWalkinBooking);
 router.post('/', strictLimiter, validateRequest(createBookingSchema), createBooking);
 router.post('/verify-payment', strictLimiter, verifyAndCreateBooking);
-router.patch('/:id/status', authorizeRoles('ADMIN', 'SUPER_ADMIN'), updateBookingStatus);
+router.patch('/:id/status', authorizeRoles('ADMIN', 'SUPER_ADMIN', 'EXECUTIVE', 'PATHOLOGY_PARTNER'), updateBookingStatus);
 router.patch('/:id/payment', authorizeRoles('ADMIN', 'SUPER_ADMIN', 'EXECUTIVE', 'PATHOLOGIST'), updatePaymentStatus);
 router.patch('/:id/assign-executive', authorizeRoles('ADMIN', 'SUPER_ADMIN'), assignExecutive);
 router.patch('/:id/assign-partner', authorizeRoles('ADMIN', 'SUPER_ADMIN'), assignPartner);
@@ -43,7 +43,7 @@ router.patch('/:id/patient-reached', authorizeRoles('USER', 'ADMIN', 'SUPER_ADMI
 router.patch('/:id/update-lab-status', authorizeRoles('ADMIN', 'SUPER_ADMIN', 'PATHOLOGIST'), updateLabStatus);
 router.patch('/:id/collect-sample', authorizeRoles('ADMIN', 'PATHOLOGIST', 'EXECUTIVE'), collectSample);
 router.get('/:id/collection-otp', generateCollectionOtp);
-router.post('/:id/verify-otp', authorizeRoles('PATHOLOGY_PARTNER'), verifyCollectionOtp);
+router.post('/:id/verify-otp', verifyCollectionOtp);
 router.post('/:id/send-invoice', authorizeRoles('ADMIN', 'SUPER_ADMIN', 'PATHOLOGIST'), sendBookingInvoice);
 
 export default router;

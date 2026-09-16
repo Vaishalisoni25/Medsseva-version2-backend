@@ -81,6 +81,7 @@ export const registerDoctor = async (req: Request, res: Response) => {
         registrationNo: cleanRegNo,
         specialization: specialization ? specialization.trim() : 'General Medicine / Pathology',
         designation: designation ? designation.trim() : 'Consulting Doctor',
+        approvalStatus: 'PENDING',
         isActive: false,
       }
     });
@@ -107,8 +108,8 @@ export const registerPartner = async (req: Request, res: Response) => {
   try {
     const {
       name, email, mobile, password,
-      labName, ownerName, role: partnerRole, cityId, city, state, pincode, branchId, address, preferredServiceArea,
-      latitude, longitude, documents
+      labName, ownerName, role: partnerRole, cityId, city, branchId, branch, state, pincode,
+      address, preferredServiceArea, latitude, longitude, documents
     } = req.body;
 
     if (!name || !mobile || !password || !labName || !partnerRole) {
@@ -119,6 +120,7 @@ export const registerPartner = async (req: Request, res: Response) => {
     if (cleanMobile.length !== 10) {
       return res.status(400).json({ error: 'Please enter a valid 10-digit mobile number' });
     }
+
     const cleanEmail = email ? String(email).trim().toLowerCase() : undefined;
 
     const existing = await prisma.user.findFirst({
@@ -157,7 +159,7 @@ export const registerPartner = async (req: Request, res: Response) => {
 
     const user = await prisma.user.create({
       data: {
-        name,
+        name: String(name).trim(),
         email: cleanEmail,
         mobile: cleanMobile,
         password: hashedPassword,
@@ -166,22 +168,54 @@ export const registerPartner = async (req: Request, res: Response) => {
       }
     });
 
+    let resolvedBranchId = branchId || null;
+    if (!resolvedBranchId && branch) {
+      const matchedBranch = await prisma.branch.findFirst({
+        where: {
+          OR: [
+            { id: branch },
+            { name: { contains: branch, mode: 'insensitive' } }
+          ]
+        }
+      });
+      if (matchedBranch) resolvedBranchId = matchedBranch.id;
+    }
+
+    let resolvedCityId = cityId || null;
+    if (!resolvedCityId && city) {
+      const matchedCity = await prisma.city.findFirst({
+        where: {
+          OR: [
+            { id: city },
+            { name: { contains: city, mode: 'insensitive' } }
+          ]
+        }
+      });
+      if (matchedCity) resolvedCityId = matchedCity.id;
+    }
+
+    const partnerCode = `PART-${user.id.slice(0, 5).toUpperCase()}`;
+
     const partner = await prisma.pathologyPartner.create({
       data: {
         userId: user.id,
-        labName,
+        labName: String(labName).trim(),
         ownerName: ownerName || name,
         role: partnerRole,
-        cityId: cityId || null,
+        partnerCode,
+        cityId: resolvedCityId,
         city: city || null,
         state: state || null,
         pincode: pincode || null,
-        branchId: branchId || null,
-        address: address || null,
+        branchId: resolvedBranchId,
+        address: address ? String(address).trim() : null,
         preferredServiceArea: preferredServiceArea || null,
         latitude: latitude || null,
         longitude: longitude || null,
-        approvalStatus: 'PENDING'
+        approvalStatus: 'PENDING',
+        commissionRate: 30,
+        paymentCycle: 'MONTHLY',
+        isAvailable: false,
       }
     });
 
@@ -214,20 +248,44 @@ export const registerPartner = async (req: Request, res: Response) => {
 
 export const registerPhlebotomist = async (req: Request, res: Response) => {
   try {
-    const { name, email, mobile, password, qualification, experience, serviceArea, address } = req.body;
+    const { name, email, mobile, password, qualification, experience, serviceArea, address, document } = req.body;
+    console.log('[AUTH] >>> POST /api/auth/register/phlebotomist received with body:', { name, mobile, email, qualification, hasDoc: !!document });
 
     const cleanMobile = String(mobile || '').trim().replace(/\D/g, '').slice(-10);
     if (cleanMobile.length !== 10) {
       return res.status(400).json({ error: 'Please enter a valid 10-digit mobile number' });
     }
-    const cleanEmail = email ? email.trim().toLowerCase() : undefined;
+    const cleanEmail = email && String(email).trim() ? String(email).trim().toLowerCase() : undefined;
 
-    const existing = await prisma.user.findFirst({
-      where: { OR: [{ mobile: cleanMobile }, ...(cleanEmail ? [{ email: cleanEmail }] : [])] }
+    // Check if mobile number is already registered in DB
+    const existingByMobile = await prisma.user.findFirst({
+      where: { mobile: cleanMobile }
     });
+    if (existingByMobile) {
+      return res.status(400).json({ error: 'This mobile number is already registered in MedsSeva. Please login instead.' });
+    }
 
-    if (existing) {
-      return res.status(400).json({ error: existing.mobile === cleanMobile ? 'Mobile already registered' : 'Email already in use' });
+    // Check if email is already registered in DB
+    if (cleanEmail) {
+      const existingByEmail = await prisma.user.findFirst({
+        where: { email: { equals: cleanEmail, mode: 'insensitive' } }
+      });
+      if (existingByEmail) {
+        return res.status(400).json({ error: 'This email is already registered in MedsSeva. Please use a different email or login.' });
+      }
+    }
+
+    // Require Government ID (Aadhaar Card or PAN Card)
+    const docData = document || (req.body.documentUrl ? {
+      documentType: req.body.documentType || 'AADHAAR',
+      fileUrl: req.body.documentUrl,
+      fileName: req.body.documentName || 'Govt_ID.jpg',
+      mimeType: req.body.mimeType || 'image/jpeg',
+      fileSize: req.body.fileSize || 0,
+    } : null);
+
+    if (!docData || !docData.fileUrl) {
+      return res.status(400).json({ error: 'Government ID (Aadhaar Card or PAN Card) is required to register as Phlebotomist.' });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -269,6 +327,7 @@ export const registerPhlebotomist = async (req: Request, res: Response) => {
         department: serviceArea ? serviceArea.trim() : 'Collection Operations',
         designation: designationStr,
         qualification: qualStr,
+        registrationNo: docData.documentType ? `${docData.documentType}: Uploaded` : null,
         userType: 'STAFF',
         isActive: false, // PENDING approval
       }
@@ -287,6 +346,37 @@ export const registerPhlebotomist = async (req: Request, res: Response) => {
         }
       }).catch(err => console.warn('Phlebotomist address creation non-fatal:', err.message));
     }
+
+    // Also create PathologyPartner record with role PHLEBOTOMIST and PENDING status
+    const partner = await prisma.pathologyPartner.create({
+      data: {
+        userId: user.id,
+        labName: `${user.name} (Phlebotomist)`,
+        role: 'PHLEBOTOMIST',
+        partnerCode: `PHLEBO-${user.id.slice(0, 5).toUpperCase()}`,
+        address: address ? address.trim() : (serviceArea ? serviceArea.trim() : 'Independent Collection Partner'),
+        approvalStatus: 'PENDING',
+        commissionRate: 15,
+        paymentCycle: 'WEEKLY',
+        isAvailable: false,
+      }
+    });
+
+    // Save uploaded Government ID (Aadhaar or PAN) to PartnerDocument
+    const isPan = String(docData.documentType || '').toUpperCase().includes('PAN');
+    const partnerDocType = isPan ? 'PAN_CARD' : 'REGISTRATION_CERTIFICATE';
+
+    await prisma.partnerDocument.create({
+      data: {
+        partnerId: partner.id,
+        documentType: partnerDocType as any,
+        fileName: docData.fileName || (isPan ? 'PAN_Card.jpg' : 'Aadhaar_Card.jpg'),
+        fileUrl: docData.fileUrl,
+        mimeType: docData.mimeType || 'image/jpeg',
+        fileSize: docData.fileSize ? Number(docData.fileSize) : 0,
+        status: 'UPLOADED',
+      }
+    }).catch(err => console.warn('Phlebotomist document save error non-fatal:', err.message));
 
     res.status(201).json({
       message: 'Phlebotomist application submitted. Awaiting admin approval.',
@@ -385,33 +475,94 @@ export const register = async (req: Request, res: Response) => {
 export const login = async (req: Request, res: Response) => {
   try {
     const { mobile, email, identifier, password } = req.body;
-    const inputVal = String(mobile || email || identifier || '').trim();
+    const rawInput = String(identifier || mobile || email || '').trim();
 
-    if (!inputVal || !password) {
+    if (!rawInput || !password) {
       return res.status(400).json({ error: 'Mobile/Email and Password are required' });
     }
 
-    let user = null;
-    if (/^\d{10}$/.test(inputVal)) {
-      user = await prisma.user.findUnique({ where: { mobile: inputVal } });
-    } else {
-      user = await prisma.user.findUnique({ where: { email: inputVal } });
-      if (!user && mobile) {
-        user = await prisma.user.findUnique({ where: { mobile: String(mobile).trim() } });
+    let user: any = null;
+    let matchedDoctor: any = null;
+
+    // 1. Clean digits for 10-digit mobile (handles +91, spaces, dashes)
+    const cleanDigits = rawInput.replace(/\D/g, '').slice(-10);
+
+    if (cleanDigits.length === 10) {
+      user = await prisma.user.findFirst({
+        where: { mobile: cleanDigits }
+      });
+    }
+
+    // 2. Try by email (case-insensitive)
+    if (!user && (rawInput.includes('@') || email)) {
+      const emailToSearch = String(email || rawInput).trim();
+      user = await prisma.user.findFirst({
+        where: { email: { equals: emailToSearch, mode: 'insensitive' } }
+      });
+    }
+
+    // 3. Try finding doctor by Code, LoginId, or RegistrationNo
+    if (!user) {
+      matchedDoctor = await (prisma as any).doctor.findFirst({
+        where: {
+          OR: [
+            { code: { equals: rawInput, mode: 'insensitive' } },
+            { loginId: { equals: rawInput, mode: 'insensitive' } },
+            { registrationNo: { equals: rawInput, mode: 'insensitive' } },
+            ...(cleanDigits.length === 10 ? [{ loginId: cleanDigits }] : []),
+          ]
+        },
+        include: { user: true }
+      });
+      if (matchedDoctor?.user) {
+        user = matchedDoctor.user;
       }
+    }
+
+    // 4. General fallback search in User by email or mobile
+    if (!user) {
+      user = await prisma.user.findFirst({
+        where: {
+          OR: [
+            { email: { equals: rawInput, mode: 'insensitive' } },
+            { mobile: rawInput },
+            ...(cleanDigits.length === 10 ? [{ mobile: cleanDigits }] : [])
+          ]
+        }
+      });
     }
 
     if (!user) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    if (!user.password) {
+    // Verify password: check user.password, or fallback to matchedDoctor.password
+    let isMatch = false;
+    if (user.password) {
+      isMatch = await bcrypt.compare(password, user.password);
+    }
+    if (!isMatch) {
+      if (!matchedDoctor) {
+        matchedDoctor = await (prisma as any).doctor.findUnique({ where: { userId: user.id } });
+      }
+      if (matchedDoctor?.password) {
+        isMatch = await bcrypt.compare(password, matchedDoctor.password);
+      }
+    }
+
+    if (!isMatch) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-      return res.status(401).json({ error: 'Invalid credentials' });
+    const userStatusRow = await prisma.$queryRawUnsafe<{ isActive: boolean }[]>(
+      'SELECT "isActive" FROM "User" WHERE "id" = $1',
+      user.id
+    ).catch(() => []);
+    if (userStatusRow?.[0]?.isActive === false) {
+      return res.status(403).json({
+        error: 'Your account has been suspended by LMS Admin. Please contact support.',
+        suspended: true,
+      });
     }
 
     if (user.role === 'USER' && user.email && !user.emailVerified) {
@@ -425,15 +576,32 @@ export const login = async (req: Request, res: Response) => {
     if (user.role === 'EXECUTIVE') {
       const adminUser = await prisma.adminUser.findUnique({ where: { userId: user.id } });
       const partner = await prisma.pathologyPartner.findUnique({ where: { userId: user.id } });
+      if (partner && partner.approvalStatus === 'SUSPENDED') {
+        return res.status(403).json({ error: 'Your phlebotomist account has been suspended. Please contact LMS Administrator.', suspended: true });
+      }
+      if (partner && partner.approvalStatus === 'REJECTED') {
+        return res.status(403).json({ error: `Your phlebotomist application was rejected: ${partner.rejectionReason || 'Contact support.'}`, rejected: true });
+      }
       if ((adminUser && !adminUser.isActive) || (partner && partner.approvalStatus === 'PENDING')) {
         return res.status(403).json({ error: 'Your phlebotomist application is pending admin approval.', pendingApproval: true });
       }
     }
 
     if (user.role === 'PATHOLOGIST' || (user.role as string) === 'DOCTOR') {
-      const doctor = await prisma.doctor.findUnique({ where: { userId: user.id } });
-      if (doctor && !doctor.isActive) {
-        return res.status(403).json({ error: 'Your doctor registration is pending admin verification.', pendingApproval: true });
+      const doctor = await (prisma as any).doctor.findUnique({ where: { userId: user.id } });
+      if (doctor) {
+        if (doctor.approvalStatus === 'PENDING') {
+          return res.status(403).json({ error: 'Your doctor registration is pending admin approval.', pendingApproval: true });
+        }
+        if (doctor.approvalStatus === 'SUSPENDED') {
+          return res.status(403).json({ error: 'Your doctor account has been suspended. Please contact LMS Administrator.', suspended: true });
+        }
+        if (doctor.approvalStatus === 'REJECTED') {
+          return res.status(403).json({ error: `Your doctor registration was rejected: ${doctor.rejectionReason || 'Please contact support.'}`, rejected: true });
+        }
+        if (!doctor.isActive) {
+          return res.status(403).json({ error: 'Your doctor account is currently deactivated. Please contact admin.', inactive: true });
+        }
       }
     }
 
@@ -492,8 +660,23 @@ export const login = async (req: Request, res: Response) => {
       },
     });
 
+    const partnerRecord = await prisma.pathologyPartner.findUnique({ where: { userId: user.id } }).catch(() => null);
+    const doctorRecord = await (prisma as any).doctor.findUnique({ where: { userId: user.id } }).catch(() => null);
+
+    const isExecutive = user.role === 'EXECUTIVE'
+      || adminUser?.role?.slug === 'executive'
+      || partnerRecord?.role === 'PHLEBOTOMIST'
+      || (partnerRecord?.labName && /phlebotomist/i.test(partnerRecord.labName))
+      || (adminUser?.designation && /phlebotomist|collector|phlebo/i.test(adminUser.designation));
+
+    const isDoctor = user.role === 'PATHOLOGIST' || (user.role as string) === 'DOCTOR' || adminUser?.role?.slug === 'doctor' || !!doctorRecord;
+
     const effectiveRole = user.role === 'SUPER_ADMIN'
       ? 'SUPER_ADMIN'
+      : isExecutive
+      ? 'EXECUTIVE'
+      : isDoctor
+      ? (user.role || 'DOCTOR')
       : (adminUser ? 'ADMIN' : user.role);
 
     const token = jwt.sign({ id: user.id, role: effectiveRole }, JWT_SECRET, { expiresIn: '30d' });
@@ -545,8 +728,7 @@ export const login = async (req: Request, res: Response) => {
       });
     }
 
-    const doctorRecord = (user.role === 'PATHOLOGIST' || (user.role as string) === 'DOCTOR') ? await prisma.doctor.findUnique({ where: { userId: user.id } }) : null;
-    const partnerRecord = ((user.role as string) === 'EXECUTIVE' || (user.role as string) === 'PATHOLOGY_PARTNER') ? await prisma.pathologyPartner.findUnique({ where: { userId: user.id } }) : null;
+    // doctorRecord and partnerRecord were already fetched and scoped above
 
     res.json({
       message: 'Login successful',
@@ -582,7 +764,14 @@ export const login = async (req: Request, res: Response) => {
           approvalStatus: partnerRecord.approvalStatus,
           isAvailable: partnerRecord.isAvailable,
           rating: partnerRecord.rating,
-        } : undefined,
+        } : (isExecutive ? {
+          id: user.id,
+          labName: `${user.name} (Collection Partner)`,
+          role: 'PHLEBOTOMIST',
+          approvalStatus: adminUser?.isActive ? 'APPROVED' : 'PENDING',
+          isAvailable: adminUser?.isActive ?? false,
+          rating: 0,
+        } : undefined),
       },
       token,
     });
@@ -661,9 +850,14 @@ export const createAdminUser = async (req: Request, res: Response) => {
     const effectivePassword = password || 'MedsSeva@123';
     const hashedPassword = await bcrypt.hash(effectivePassword, 10);
 
-    const prismaRole = role.slug ? role.slug.toUpperCase().replace(/ /g, '_').replace(/-/g, '_') as any : 'ADMIN';
+    const isPhlebo = 
+      (designation && /phlebotomist|collector|phlebo/i.test(designation)) ||
+      (department && /phlebotom|sample collection/i.test(department)) ||
+      role.slug === 'executive';
+
+    const prismaRole = isPhlebo ? 'EXECUTIVE' : (role.slug ? role.slug.toUpperCase().replace(/ /g, '_').replace(/-/g, '_') as any : 'ADMIN');
     const validRoles = ['ADMIN', 'FRANCHISE', 'LAB_DEPARTMENT', 'EXECUTIVE', 'PATHOLOGIST'];
-    const userRole = validRoles.includes(prismaRole) ? prismaRole : (userType === 'DOCTOR' ? 'PATHOLOGIST' : 'ADMIN');
+    const userRole = isPhlebo ? 'EXECUTIVE' : (validRoles.includes(prismaRole) ? prismaRole : (userType === 'DOCTOR' ? 'PATHOLOGIST' : 'ADMIN'));
 
     const mobile = req.body.mobile?.trim() || `adm_${Date.now()}`;
 
@@ -725,12 +919,38 @@ export const createAdminUser = async (req: Request, res: Response) => {
             signatureUrl: signatureUrl || null,
             branchId: targetBranchId,
             partnerId: partnerId || null,
-            isActive: true,
+            approvalStatus: 'PENDING',
+            isActive: false,
           },
         });
       } catch (docErr) {
         console.error('Failed to sync Doctor model:', docErr);
       }
+    }
+
+    if (isPhlebo) {
+      await prisma.pathologyPartner.upsert({
+        where: { userId: user.id },
+        update: {
+          labName: `${user.name} (Phlebotomist)`,
+          role: 'PHLEBOTOMIST',
+          approvalStatus: 'APPROVED',
+          isAvailable: true,
+          branchId: targetBranchId,
+        },
+        create: {
+          userId: user.id,
+          labName: `${user.name} (Phlebotomist)`,
+          role: 'PHLEBOTOMIST',
+          partnerCode: `PHLEBO-${user.id.slice(0, 5).toUpperCase()}`,
+          address: department || 'Collection Operations',
+          approvalStatus: 'APPROVED',
+          commissionRate: 15,
+          paymentCycle: 'WEEKLY',
+          isAvailable: true,
+          branchId: targetBranchId,
+        },
+      }).catch(err => console.warn('Pathology partner creation for adminUser phlebo non-fatal:', err.message));
     }
 
     res.status(201).json(adminUser);
@@ -984,8 +1204,21 @@ export const updatePartnerApproval = async (req: Request, res: Response) => {
 
 export const getAvailablePartners = async (req: Request, res: Response) => {
   try {
+    const { branchId, cityId } = req.query;
+    const whereClause: any = { approvalStatus: 'APPROVED', isAvailable: true };
+
+    if (branchId && branchId !== 'ALL' && branchId !== 'all') {
+      whereClause.OR = [
+        { branchId: String(branchId) },
+        { branchId: null }
+      ];
+    }
+    if (cityId && cityId !== 'ALL' && cityId !== 'all') {
+      whereClause.cityId = String(cityId);
+    }
+
     const partners = await prisma.pathologyPartner.findMany({
-      where: { approvalStatus: 'APPROVED', isAvailable: true },
+      where: whereClause,
       include: {
         user: { select: { id: true, name: true, mobile: true, avatarUrl: true } }
       }
@@ -1441,7 +1674,19 @@ export const getAllUsers = async (req: any, res: Response) => {
         },
       },
     });
-    res.json(users);
+
+    const userStatusRows = await prisma.$queryRawUnsafe<{ id: string; isActive: boolean }[]>(
+      'SELECT "id", "isActive" FROM "User"'
+    ).catch(() => []);
+    const activeMap = new Map<string, boolean>();
+    (userStatusRows || []).forEach(r => activeMap.set(r.id, r.isActive !== false));
+
+    const enriched = users.map(u => ({
+      ...u,
+      isActive: activeMap.has(u.id) ? activeMap.get(u.id) : true,
+    }));
+
+    res.json(enriched);
   } catch (error: any) {
     console.error('Error fetching registered users:', error);
     res.status(500).json({ error: 'Failed to fetch registered users', details: error.message });
@@ -1550,11 +1795,19 @@ export const createPatientUser = async (req: any, res: Response) => {
 export const updatePatientUser = async (req: any, res: Response) => {
   try {
     const { id } = req.params;
-    const { name, email, mobile, gender, dob, bloodGroup, altMobile, address } = req.body;
+    const { name, email, mobile, gender, dob, bloodGroup, altMobile, address, isActive } = req.body;
 
     const user = await prisma.user.findUnique({ where: { id } });
     if (!user) {
       return res.status(404).json({ error: 'Patient not found' });
+    }
+
+    if (isActive !== undefined) {
+      await prisma.$executeRawUnsafe(
+        'UPDATE "User" SET "isActive" = $1 WHERE "id" = $2',
+        Boolean(isActive),
+        id
+      );
     }
 
     const updateData: any = {};
@@ -1591,27 +1844,37 @@ export const updatePatientUser = async (req: any, res: Response) => {
       }
     }
 
-    const updated = await prisma.user.update({
-      where: { id },
-      data: updateData,
-      include: {
-        familyMembers: true,
-        addresses: true,
-        bookings: {
-          select: {
-            id: true,
-            bookingCode: true,
-            branchId: true,
-            branch: { select: { id: true, name: true, city: true, code: true } },
-            status: true,
-            createdAt: true,
-            totalPaid: true,
-          },
-          orderBy: { createdAt: 'desc' },
-          take: 10,
+    const includeOptions = {
+      familyMembers: true,
+      addresses: true,
+      bookings: {
+        select: {
+          id: true,
+          bookingCode: true,
+          branchId: true,
+          branch: { select: { id: true, name: true, city: true, code: true } },
+          status: true,
+          createdAt: true,
+          totalPaid: true,
         },
+        orderBy: { createdAt: 'desc' as const },
+        take: 10,
       },
-    });
+    };
+
+    let updated: any = null;
+    if (Object.keys(updateData).length > 0) {
+      updated = await prisma.user.update({
+        where: { id },
+        data: updateData,
+        include: includeOptions,
+      });
+    } else {
+      updated = await prisma.user.findUnique({
+        where: { id },
+        include: includeOptions,
+      });
+    }
 
     if (address && String(address).trim()) {
       const existingAddr = await prisma.address.findFirst({ where: { userId: id } });
@@ -1635,7 +1898,13 @@ export const updatePatientUser = async (req: any, res: Response) => {
       }
     }
 
-    res.json({ message: 'Patient updated successfully', user: updated });
+    const userStatusRow = await prisma.$queryRawUnsafe<{ isActive: boolean }[]>(
+      'SELECT "isActive" FROM "User" WHERE "id" = $1',
+      id
+    ).catch(() => []);
+    const effectiveIsActive = userStatusRow?.[0]?.isActive !== false;
+
+    res.json({ message: 'Patient updated successfully', user: { ...updated, isActive: effectiveIsActive } });
   } catch (error: any) {
     console.error('Error updating patient:', error);
     res.status(500).json({ error: 'Failed to update patient', details: error.message });
@@ -1684,14 +1953,20 @@ export const doctorLogin = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Doctor Code / Login ID / Mobile and Password are required' });
     }
 
+    const cleanDigits = inputVal.replace(/\D/g, '').slice(-10);
+
     const doctor = await (prisma as any).doctor.findFirst({
       where: {
-        isActive: true,
         OR: [
           { code: { equals: inputVal, mode: 'insensitive' } },
           { loginId: { equals: inputVal, mode: 'insensitive' } },
-          { user: { mobile: inputVal } },
+          { registrationNo: { equals: inputVal, mode: 'insensitive' } },
           { user: { email: { equals: inputVal, mode: 'insensitive' } } },
+          { user: { mobile: inputVal } },
+          ...(cleanDigits.length === 10 ? [
+            { loginId: cleanDigits },
+            { user: { mobile: cleanDigits } },
+          ] : []),
           { id: inputVal },
         ],
       },
@@ -1703,6 +1978,16 @@ export const doctorLogin = async (req: Request, res: Response) => {
 
     if (!doctor) {
       return res.status(401).json({ error: 'Doctor account not found with provided credentials' });
+    }
+
+    if (doctor.approvalStatus === 'PENDING' || !doctor.isActive) {
+      if (doctor.approvalStatus === 'REJECTED') {
+        return res.status(403).json({ error: 'Your doctor registration has been rejected. Please contact support.', rejected: true });
+      }
+      if (doctor.approvalStatus === 'SUSPENDED') {
+        return res.status(403).json({ error: 'Your doctor account is suspended. Please contact administrator.', suspended: true });
+      }
+      return res.status(403).json({ error: 'Your doctor registration is pending admin approval.', pendingApproval: true });
     }
 
     let isMatch = false;

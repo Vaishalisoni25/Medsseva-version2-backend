@@ -6,6 +6,7 @@ import { env } from '../config/env';
 import { pricingService } from '../services/pricing.service';
 import { paymentService } from '../services/payment.service';
 import { sendNotificationToUser, sendNotificationToMultipleUsers } from '../services/notification.service';
+import { getOrFindPartner } from './partnerController';
 
 const generateSlotsFromSettings = (openTime: string, closeTime: string): string[] => {
   const toMinutes = (t: string): number => {
@@ -126,7 +127,14 @@ export const getAllBookings = async (req: any, res: Response) => {
       where.assignedExecutiveId = req.user.id;
       where.collectionMode = 'HOME';
     } else if (!['ADMIN', 'SUPER_ADMIN', 'PATHOLOGIST', 'LAB_DEPARTMENT', 'FRANCHISE'].includes(req.user.role)) {
-      where.userId = req.user.id;
+      const userConditions: any[] = [{ userId: req.user.id }];
+      if (req.user.mobile) {
+        userConditions.push({ user: { mobile: req.user.mobile } });
+      }
+      if (mobile) {
+        userConditions.push({ user: { mobile: String(mobile) } });
+      }
+      where.OR = userConditions;
     } else {
       if (mobile) where.user = { mobile: String(mobile) };
 
@@ -147,6 +155,7 @@ export const getAllBookings = async (req: any, res: Response) => {
         packages: { include: { package: true } },
         report: { include: { parameters: true } },
         assignedPartner: { include: { user: { select: { name: true, mobile: true, avatarUrl: true } } } },
+        assignedExecutive: { select: { id: true, name: true, mobile: true, avatarUrl: true } },
         branch: true,
         statusTimeline: { orderBy: { createdAt: 'asc' } },
      payment: {
@@ -305,6 +314,7 @@ const user = await prisma.user.findUnique({ where: { id: req.user.id } });
           status: safeCollectionMode === 'HOME' ? 'WAITING_FOR_PARTNER' : 'WAITING_FOR_ASSIGNMENT',
           paymentStatus: 'PENDING',
           collectionMode: safeCollectionMode as any,
+          collectionOtp: safeCollectionMode === 'HOME' ? Math.floor(1000 + Math.random() * 9000).toString() : null,
           addressId: finalAddressId,
           branchId: finalBranchId,
           paymentMode: resolvedPaymentMode as any,
@@ -608,12 +618,16 @@ export const assignExecutive = async (req: any, res: Response) => {
 export const generateCollectionOtp = async (req: any, res: Response) => {
   try {
     const { id } = req.params;
-    const partner = await prisma.pathologyPartner.findUnique({ where: { userId: req.user.id } });
-    if (!partner) return res.status(404).json({ error: 'Partner not found.' });
+    let partner = await getOrFindPartner(req.user.id, req.user.role);
     const booking = await prisma.booking.findUnique({ where: { id } });
     if (!booking) return res.status(404).json({ error: 'Booking not found.' });
-    if (booking.assignedPartnerId !== partner.id) return res.status(403).json({ error: 'Not your booking.' });
-    if (booking.paymentStatus === 'SUCCESS') return res.json({ otpRequired: false });
+
+    const isAssigned = (partner && booking.assignedPartnerId === partner.id) ||
+      booking.assignedExecutiveId === req.user.id ||
+      booking.userId === req.user.id ||
+      ['ADMIN', 'SUPER_ADMIN'].includes(req.user.role);
+    if (!isAssigned) return res.status(403).json({ error: 'Not your booking.' });
+
     if (booking.collectionOtp) return res.json({ otpRequired: true, otp: booking.collectionOtp });
 
     const otpBytes = crypto.randomBytes(4);
@@ -629,17 +643,47 @@ export const verifyCollectionOtp = async (req: any, res: Response) => {
   try {
     const { id } = req.params;
     const { otp } = req.body;
-    const partner = await prisma.pathologyPartner.findUnique({ where: { userId: req.user.id } });
-    if (!partner) return res.status(404).json({ error: 'Partner not found.' });
+    const cleanOtp = String(otp || '').trim();
+    if (!cleanOtp || cleanOtp.length < 4) {
+      return res.status(400).json({ error: 'Please provide a valid 4-digit OTP.' });
+    }
+
     const booking = await prisma.booking.findUnique({ where: { id } });
     if (!booking) return res.status(404).json({ error: 'Booking not found.' });
-    if (booking.assignedPartnerId !== partner.id) return res.status(403).json({ error: 'Not your booking.' });
-    if (booking.otpVerified) return res.json({ verified: true });
-    if (booking.collectionOtp !== otp) return res.status(400).json({ error: 'Invalid OTP.' });
-    await prisma.booking.update({ where: { id }, data: { otpVerified: true } });
-    res.json({ verified: true });
+
+    if (booking.otpVerified) {
+      return res.json({ verified: true, paymentStatus: booking.paymentStatus, status: booking.status });
+    }
+
+    if (booking.collectionOtp && String(booking.collectionOtp).trim() !== cleanOtp) {
+      return res.status(400).json({ error: 'Invalid OTP. Please check the 4-digit code provided by patient.' });
+    }
+
+    const updated = await prisma.booking.update({
+      where: { id },
+      data: {
+        otpVerified: true,
+        collectionOtp: booking.collectionOtp || cleanOtp,
+      },
+    });
+
+    await prisma.bookingStatusLog.create({
+      data: {
+        bookingId: id,
+        status: booking.status as any,
+        note: 'Collection OTP verified successfully',
+        updatedBy: req.user?.id || 'SYSTEM',
+      }
+    });
+
+    res.json({
+      verified: true,
+      paymentStatus: updated.paymentStatus,
+      status: updated.status,
+      booking: updated,
+    });
   } catch (error: any) {
-    res.status(500).json({ error: 'Failed to verify OTP' });
+    res.status(500).json({ error: 'Failed to verify OTP', details: error.message });
   }
 };
 
