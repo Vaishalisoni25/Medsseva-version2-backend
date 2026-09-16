@@ -248,8 +248,8 @@ export const registerPartner = async (req: Request, res: Response) => {
 
 export const registerPhlebotomist = async (req: Request, res: Response) => {
   try {
-    const { name, email, mobile, password, qualification, experience, serviceArea, address, document } = req.body;
-    console.log('[AUTH] >>> POST /api/auth/register/phlebotomist received with body:', { name, mobile, email, qualification, hasDoc: !!document });
+    const { name, email, mobile, password, qualification, otherDetails, experience, serviceArea, address, documents, document } = req.body;
+    console.log('[AUTH] >>> POST /api/auth/register/phlebotomist received with body:', { name, mobile, email, qualification, otherDetails, docCount: Array.isArray(documents) ? documents.length : (document ? 1 : 0) });
 
     const cleanMobile = String(mobile || '').trim().replace(/\D/g, '').slice(-10);
     if (cleanMobile.length !== 10) {
@@ -275,16 +275,23 @@ export const registerPhlebotomist = async (req: Request, res: Response) => {
       }
     }
 
-    // Require Government ID (Aadhaar Card or PAN Card)
-    const docData = document || (req.body.documentUrl ? {
-      documentType: req.body.documentType || 'AADHAAR',
-      fileUrl: req.body.documentUrl,
-      fileName: req.body.documentName || 'Govt_ID.jpg',
-      mimeType: req.body.mimeType || 'image/jpeg',
-      fileSize: req.body.fileSize || 0,
-    } : null);
+    // Normalise: accept `documents` (array) or legacy `document` (single) or fallback to top-level fields
+    let docsArray: Array<{ documentType: string; fileUrl: string; fileName?: string; mimeType?: string; fileSize?: number; }> = [];
+    if (Array.isArray(documents) && documents.length > 0) {
+      docsArray = documents.filter((d: any) => d && d.fileUrl);
+    } else if (document && document.fileUrl) {
+      docsArray = [document];
+    } else if (req.body.documentUrl) {
+      docsArray = [{
+        documentType: req.body.documentType || 'AADHAAR',
+        fileUrl: req.body.documentUrl,
+        fileName: req.body.documentName || 'Govt_ID.jpg',
+        mimeType: req.body.mimeType || 'image/jpeg',
+        fileSize: req.body.fileSize || 0,
+      }];
+    }
 
-    if (!docData || !docData.fileUrl) {
+    if (docsArray.length === 0) {
       return res.status(400).json({ error: 'Government ID (Aadhaar Card or PAN Card) is required to register as Phlebotomist.' });
     }
 
@@ -317,8 +324,10 @@ export const registerPhlebotomist = async (req: Request, res: Response) => {
     }
 
     const qualStr = qualification ? qualification.trim() : '';
+    const detailsStr = otherDetails && String(otherDetails).trim() ? String(otherDetails).trim() : '';
+    const fullQualStr = detailsStr ? `${qualStr} (${detailsStr})` : qualStr;
     const expStr = experience ? experience.trim() : '';
-    const designationStr = expStr ? `Phlebotomist (${qualStr} - ${expStr})` : `Phlebotomist (${qualStr})`;
+    const designationStr = expStr ? `Phlebotomist (${fullQualStr} - ${expStr})` : `Phlebotomist (${fullQualStr})`;
 
     await prisma.adminUser.create({
       data: {
@@ -326,8 +335,8 @@ export const registerPhlebotomist = async (req: Request, res: Response) => {
         roleId: execRole.id,
         department: serviceArea ? serviceArea.trim() : 'Collection Operations',
         designation: designationStr,
-        qualification: qualStr,
-        registrationNo: docData.documentType ? `${docData.documentType}: Uploaded` : null,
+        qualification: fullQualStr || qualStr,
+        registrationNo: docsArray.map((d: any) => String(d.documentType || '').toUpperCase()).filter(Boolean).join(' + ') || null,
         userType: 'STAFF',
         isActive: false, // PENDING approval
       }
@@ -362,21 +371,35 @@ export const registerPhlebotomist = async (req: Request, res: Response) => {
       }
     });
 
-    // Save uploaded Government ID (Aadhaar or PAN) to PartnerDocument
-    const isPan = String(docData.documentType || '').toUpperCase().includes('PAN');
-    const partnerDocType = isPan ? 'PAN_CARD' : 'REGISTRATION_CERTIFICATE';
-
-    await prisma.partnerDocument.create({
-      data: {
-        partnerId: partner.id,
-        documentType: partnerDocType as any,
-        fileName: docData.fileName || (isPan ? 'PAN_Card.jpg' : 'Aadhaar_Card.jpg'),
-        fileUrl: docData.fileUrl,
-        mimeType: docData.mimeType || 'image/jpeg',
-        fileSize: docData.fileSize ? Number(docData.fileSize) : 0,
-        status: 'UPLOADED',
-      }
-    }).catch(err => console.warn('Phlebotomist document save error non-fatal:', err.message));
+    // Save all uploaded Government ID documents (Aadhaar and/or PAN)
+    for (const docData of docsArray) {
+      const isPan = String(docData.documentType || '').toUpperCase().includes('PAN');
+      const partnerDocType = isPan ? 'PAN_CARD' : 'REGISTRATION_CERTIFICATE';
+      await prisma.partnerDocument.upsert({
+        where: {
+          partnerId_documentType: {
+            partnerId: partner.id,
+            documentType: partnerDocType as any,
+          }
+        },
+        create: {
+          partnerId: partner.id,
+          documentType: partnerDocType as any,
+          fileName: docData.fileName || (isPan ? 'PAN_Card.jpg' : 'Aadhaar_Card.jpg'),
+          fileUrl: docData.fileUrl,
+          mimeType: docData.mimeType || 'image/jpeg',
+          fileSize: docData.fileSize ? Number(docData.fileSize) : 0,
+          status: 'UPLOADED',
+        },
+        update: {
+          fileName: docData.fileName || (isPan ? 'PAN_Card.jpg' : 'Aadhaar_Card.jpg'),
+          fileUrl: docData.fileUrl,
+          mimeType: docData.mimeType || 'image/jpeg',
+          fileSize: docData.fileSize ? Number(docData.fileSize) : 0,
+          status: 'UPLOADED',
+        }
+      }).catch(err => console.warn('Phlebotomist document save error non-fatal:', err.message));
+    }
 
     res.status(201).json({
       message: 'Phlebotomist application submitted. Awaiting admin approval.',
@@ -652,6 +675,7 @@ export const login = async (req: Request, res: Response) => {
     const adminUser = await prisma.adminUser.findUnique({
       where: { userId: user.id },
       include: {
+        branch: true,
         role: {
           include: {
             permissions: { include: { permission: true } },
@@ -739,8 +763,12 @@ export const login = async (req: Request, res: Response) => {
         email: user.email,
         role: effectiveRole,
         branchId: adminUser?.branchId || null,
+        branchName: adminUser?.branch?.name || null,
         franchiseId: adminUser?.franchiseId || null,
         userType: adminUser?.userType || null,
+        isEmployee: !!(adminUser && (adminUser.userType === 'STAFF' || adminUser.userType === 'EMPLOYEE' || (adminUser.designation && /phlebotomist|collector|phlebo/i.test(adminUser.designation)))),
+        phlebotomistType: (adminUser && (adminUser.userType === 'STAFF' || adminUser.userType === 'EMPLOYEE' || (adminUser.designation && /phlebotomist|collector|phlebo/i.test(adminUser.designation)))) ? 'EMPLOYEE' : 'FREELANCER',
+        designation: adminUser?.designation || null,
         referralCode: userReferralCode,
         isFirstTestFreeEligible: user.isFirstTestFreeEligible,
         firstTestFreeUsed: user.firstTestFreeUsed,
@@ -1119,11 +1147,46 @@ export const deleteAdminUser = async (req: Request, res: Response) => {
 
 export const getPartners = async (req: Request, res: Response) => {
   try {
-    const { status } = req.query;
+    const { status, branchId, city } = req.query as any;
+    let targetBranchIds: string[] | undefined = undefined;
+    if (branchId && branchId !== 'ALL' && branchId !== 'all') {
+      targetBranchIds = [branchId];
+    } else if (city && city !== 'ALL' && city !== 'all') {
+      const cityBranches = await prisma.branch.findMany({
+        where: { city: { equals: city, mode: 'insensitive' } },
+        select: { id: true }
+      });
+      targetBranchIds = cityBranches.map(b => b.id);
+    }
+
+    const where: any = {};
+    if (status && status !== 'ALL') {
+      where.approvalStatus = status as any;
+    }
+    if (targetBranchIds && targetBranchIds.length > 0) {
+      where.OR = [
+        { branchId: { in: targetBranchIds } },
+        { user: { adminUser: { branchId: { in: targetBranchIds } } } }
+      ];
+    }
     const partners = await prisma.pathologyPartner.findMany({
-      where: status ? { approvalStatus: status as any } : undefined,
+      where: Object.keys(where).length > 0 ? where : undefined,
       include: {
-        user: { select: { id: true, name: true, email: true, mobile: true, createdAt: true } },
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            mobile: true,
+            createdAt: true,
+            adminUser: {
+              select: {
+                branchId: true,
+                branch: { select: { id: true, name: true, city: true } }
+              }
+            }
+          }
+        },
         documents: true,
       },
       orderBy: { createdAt: 'desc' }

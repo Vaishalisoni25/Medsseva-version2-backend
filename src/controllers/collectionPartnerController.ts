@@ -2,18 +2,31 @@ import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { triggerApprovalNotification } from '../services/notification.service';
 
+async function resolveTargetBranchIds(branchId?: string, labId?: string, city?: string): Promise<string[] | undefined> {
+  const specific = (branchId && branchId !== 'ALL' && branchId !== 'all') ? branchId : ((labId && labId !== 'ALL' && labId !== 'all') ? labId : undefined);
+  if (specific) return [specific];
+  if (city && city !== 'ALL' && city !== 'all') {
+    const branches = await prisma.branch.findMany({
+      where: { city: { equals: city, mode: 'insensitive' } },
+      select: { id: true }
+    });
+    return branches.map(b => b.id);
+  }
+  return undefined;
+}
+
 export const getCollectionPartnersSummary = async (req: Request, res: Response) => {
   try {
-    const { branchId, labId } = req.query;
-    const targetBranchId = (branchId || labId) as string;
+    const { branchId, labId, city } = req.query as any;
+    const targetBranchIds = await resolveTargetBranchIds(branchId, labId, city);
 
     const executives = await prisma.user.findMany({
       where: {
         role: 'EXECUTIVE',
-        ...(targetBranchId && targetBranchId !== 'ALL' && targetBranchId !== 'all' ? {
+        ...(targetBranchIds && targetBranchIds.length > 0 ? {
           OR: [
-            { adminUser: { branchId: targetBranchId } },
-            { pathologyPartner: { branchId: targetBranchId } }
+            { adminUser: { branchId: { in: targetBranchIds } } },
+            { pathologyPartner: { branchId: { in: targetBranchIds } } }
           ]
         } : {})
       },
@@ -28,13 +41,19 @@ export const getCollectionPartnersSummary = async (req: Request, res: Response) 
       where: {
         assignedExecutiveId: { in: executives.map(e => e.id) },
         status: { in: ['COMPLETED', 'DELIVERED_TO_LAB', 'REPORT_READY', 'SAMPLE_COLLECTED'] },
-        ...(targetBranchId && targetBranchId !== 'ALL' && targetBranchId !== 'all' ? { branchId: targetBranchId } : {})
+        ...(targetBranchIds && targetBranchIds.length > 0 ? { branchId: { in: targetBranchIds } } : {})
       }
     });
 
     const totalCollections = bookings.length;
     const totalCommission = bookings.reduce((sum, b) => sum + ((b.totalPaid || 0) * 0.30), 0);
     const totalWalletBalance = totalCommission;
+
+    const branches = await prisma.branch.findMany({
+      where: { isActive: true },
+      select: { id: true, name: true, city: true },
+      orderBy: { name: 'asc' }
+    });
 
     res.json({
       totalPartners,
@@ -43,6 +62,7 @@ export const getCollectionPartnersSummary = async (req: Request, res: Response) 
       totalCollections,
       totalCommission: Math.round(totalCommission),
       totalWalletBalance: Math.round(totalWalletBalance),
+      branches,
     });
   } catch (error: any) {
     console.error('Error in getCollectionPartnersSummary:', error);
@@ -52,16 +72,16 @@ export const getCollectionPartnersSummary = async (req: Request, res: Response) 
 
 export const getCollectionPartners = async (req: Request, res: Response) => {
   try {
-    const { search, labId, branchId, status } = req.query;
-    const targetBranchId = (branchId || labId) as string;
+    const { search, labId, branchId, city, status } = req.query as any;
+    const targetBranchIds = await resolveTargetBranchIds(branchId, labId, city);
 
     const executives = await prisma.user.findMany({
       where: {
         role: 'EXECUTIVE',
-        ...(targetBranchId && targetBranchId !== 'ALL' && targetBranchId !== 'all' ? {
+        ...(targetBranchIds && targetBranchIds.length > 0 ? {
           OR: [
-            { adminUser: { branchId: targetBranchId } },
-            { pathologyPartner: { branchId: targetBranchId } }
+            { adminUser: { branchId: { in: targetBranchIds } } },
+            { pathologyPartner: { branchId: { in: targetBranchIds } } }
           ]
         } : {})
       },
@@ -69,7 +89,9 @@ export const getCollectionPartners = async (req: Request, res: Response) => {
         adminUser: {
           include: { branch: true }
         },
-        pathologyPartner: true
+        pathologyPartner: {
+          include: { documents: true }
+        }
       },
       orderBy: { createdAt: 'desc' }
     });
@@ -111,6 +133,16 @@ export const getCollectionPartners = async (req: Request, res: Response) => {
         labName: `${e.name} (Freelance Phlebotomist)`,
         role: 'PHLEBOTOMIST',
         address: adminUser?.department || 'Independent',
+        qualification: adminUser?.qualification || 'Not Specified',
+        experience: adminUser?.designation || null,
+        serviceArea: adminUser?.department || partner?.address || 'Independent',
+        documents: (partner?.documents || []).map((doc: any) => ({
+          id: doc.id,
+          documentType: doc.documentType,
+          fileName: doc.fileName,
+          fileUrl: doc.fileUrl,
+          status: doc.status,
+        })),
         assignedLab: branch ? { id: branch.id, name: branch.name, city: branch.city } : null,
         commissionRate,
         paymentCycle: partner?.paymentCycle || 'WEEKLY',
@@ -153,8 +185,10 @@ export const getCollectionPartnerDetails = async (req: Request, res: Response) =
     const user = await prisma.user.findFirst({
       where: { id, role: 'EXECUTIVE' },
       include: {
-        adminUser: { include: { branch: true } },
-        pathologyPartner: true
+        adminUser: { include: { branch: true, role: true } },
+        pathologyPartner: {
+          include: { documents: true }
+        }
       }
     });
 
@@ -174,12 +208,24 @@ export const getCollectionPartnerDetails = async (req: Request, res: Response) =
       orderBy: { createdAt: 'desc' }
     });
 
-    const partnerCommissionRate = user.pathologyPartner?.commissionRate ?? 30.0;
+    const adminUser = user.adminUser;
+    const isEmployeeStaff = !!(
+      adminUser && (
+        adminUser.userType === 'EMPLOYEE' ||
+        adminUser.userType === 'STAFF' ||
+        adminUser.branchId ||
+        adminUser.role?.slug === 'executive' ||
+        (adminUser.designation && /phlebotomist|collector|phlebo|staff|employee/i.test(adminUser.designation)) ||
+        (adminUser.department && /phlebotom|sample collection/i.test(adminUser.department))
+      )
+    );
+
+    const partnerCommissionRate = isEmployeeStaff ? 0 : (user.pathologyPartner?.commissionRate ?? 30.0);
 
     const collectionsHistory = bookings.map(b => {
       const testName = b.tests.map(t => t.test.name).concat(b.packages.map(p => p.package.name)).join(', ') || 'Diagnostic Test';
       const commissionRate = partnerCommissionRate;
-      const commissionAmount = Math.round((b.totalPaid || 0) * (commissionRate / 100));
+      const commissionAmount = isEmployeeStaff ? 0 : Math.round((b.totalPaid || 0) * (commissionRate / 100));
 
       return {
         id: b.id,
@@ -209,7 +255,6 @@ export const getCollectionPartnerDetails = async (req: Request, res: Response) =
       };
     });
 
-    const adminUser = user.adminUser;
     const partner = user.pathologyPartner;
     let currentStatus = 'PENDING';
     if (partner?.approvalStatus) {
@@ -235,9 +280,19 @@ export const getCollectionPartnerDetails = async (req: Request, res: Response) =
       status: currentStatus,
       isAvailable,
       partnerCode: `PHLEBO-${user.id.slice(0, 5).toUpperCase()}`,
-      labName: `${user.name} (Freelance Phlebotomist)`,
+      labName: isEmployeeStaff ? `${user.name} (In-House Staff)` : `${user.name} (Freelance Phlebotomist)`,
       role: 'PHLEBOTOMIST',
       address: adminUser?.department || 'Independent',
+      qualification: adminUser?.qualification || 'Not Specified',
+      experience: adminUser?.designation || null,
+      serviceArea: adminUser?.department || partner?.address || 'Independent',
+      documents: (partner?.documents || []).map((doc: any) => ({
+        id: doc.id,
+        documentType: doc.documentType,
+        fileName: doc.fileName,
+        fileUrl: doc.fileUrl,
+        status: doc.status,
+      })),
       assignedLab: branch ? { id: branch.id, name: branch.name, city: branch.city } : null,
       commissionRate: partnerCommissionRate,
       paymentCycle: partner?.paymentCycle || 'WEEKLY',
@@ -263,14 +318,14 @@ export const getCollectionPartnerDetails = async (req: Request, res: Response) =
 
 export const getDailyCollectionSummary = async (req: Request, res: Response) => {
   try {
-    const { branchId, labId } = req.query;
-    const targetBranchId = (branchId || labId) as string;
+    const { branchId, labId, city } = req.query as any;
+    const targetBranchIds = await resolveTargetBranchIds(branchId, labId, city);
 
     const bookings = await prisma.booking.findMany({
       where: {
         assignedExecutiveId: { not: null },
         status: { in: ['COMPLETED', 'DELIVERED_TO_LAB', 'REPORT_READY', 'SAMPLE_COLLECTED'] },
-        ...(targetBranchId && targetBranchId !== 'ALL' && targetBranchId !== 'all' ? { branchId: targetBranchId } : {})
+        ...(targetBranchIds && targetBranchIds.length > 0 ? { branchId: { in: targetBranchIds } } : {})
       },
       orderBy: { createdAt: 'asc' }
     });
@@ -300,11 +355,11 @@ export const getDailyCollectionSummary = async (req: Request, res: Response) => 
 
 export const getLabWiseCollections = async (req: Request, res: Response) => {
   try {
-    const { branchId, labId } = req.query;
-    const targetBranchId = (branchId || labId) as string;
+    const { branchId, labId, city } = req.query as any;
+    const targetBranchIds = await resolveTargetBranchIds(branchId, labId, city);
 
     const branches = await prisma.branch.findMany({
-      where: targetBranchId && targetBranchId !== 'ALL' && targetBranchId !== 'all' ? { id: targetBranchId } : undefined
+      where: targetBranchIds && targetBranchIds.length > 0 ? { id: { in: targetBranchIds } } : undefined
     });
     const result = await Promise.all(branches.map(async b => {
       const bookings = await prisma.booking.findMany({

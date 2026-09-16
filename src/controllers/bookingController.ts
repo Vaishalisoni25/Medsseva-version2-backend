@@ -583,7 +583,12 @@ export const assignPartner = async (req: any, res: Response) => {
 
     const updated = await prisma.booking.update({
       where: { id },
-      data: { assignedPartnerId: partnerId, partnerAssignedAt: new Date(), status: 'ASSIGNED' },
+      data: {
+        assignedPartnerId: partnerId,
+        partnerAssignedAt: new Date(),
+        status: 'ASSIGNED',
+        assignedExecutiveId: partner.userId || undefined,
+      },
     });
 
     await prisma.bookingStatusLog.create({ data: { bookingId: id, status: 'ASSIGNED', note: `Partner ${partner.user.name} assigned`, updatedBy: req.user.id } });
@@ -608,7 +613,19 @@ export const assignExecutive = async (req: any, res: Response) => {
     if (!booking) return res.status(404).json({ error: 'Booking not found.' });
     if (booking.collectionMode !== 'HOME') return res.status(400).json({ error: 'Executives can only be assigned to Home Collection bookings.' });
 
-    const updated = await prisma.booking.update({ where: { id }, data: { assignedExecutiveId: executiveId } });
+    let partner = await prisma.pathologyPartner.findUnique({ where: { userId: executiveId } });
+    if (!partner) {
+      partner = await getOrFindPartner(executiveId, executive.role);
+    }
+
+    const updated = await prisma.booking.update({
+      where: { id },
+      data: {
+        assignedExecutiveId: executiveId,
+        assignedPartnerId: partner?.id || undefined,
+        partnerAssignedAt: new Date(),
+      }
+    });
     res.json(updated);
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to assign executive' });

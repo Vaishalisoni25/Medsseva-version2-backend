@@ -379,35 +379,59 @@ export const updateBookingStatus = async (req: any, res: Response) => {
           data: { totalCollections: { increment: 1 } }
         });
 
-        // Record 30% commission for freelance phlebotomist
-        try {
-          const commRate = partner.commissionRate || 30.0;
-          const testAmt = booking.totalPaid || 0;
-          const commAmt = Math.round((testAmt * commRate) / 100);
-
-          const existingComm = await (prisma as any).referralCommission.findFirst({
-            where: { bookingId: id, entityType: 'PARTNER' }
+        // Check if phlebotomist is an in-house employee/staff
+        const collectorUserId = req.user?.id || partner.userId;
+        let isEmployeeStaff = false;
+        if (collectorUserId) {
+          const adminUserRecord = await prisma.adminUser.findUnique({
+            where: { userId: collectorUserId },
+            include: { role: true }
           });
+          isEmployeeStaff = !!(
+            adminUserRecord && (
+              adminUserRecord.userType === 'EMPLOYEE' ||
+              adminUserRecord.userType === 'STAFF' ||
+              adminUserRecord.branchId ||
+              adminUserRecord.role?.slug === 'executive' ||
+              (adminUserRecord.designation && /phlebotomist|collector|phlebo|staff|employee/i.test(adminUserRecord.designation)) ||
+              (adminUserRecord.department && /phlebotom|sample collection/i.test(adminUserRecord.department))
+            )
+          );
+        }
 
-          if (!existingComm) {
-            await (prisma as any).referralCommission.create({
-              data: {
-                bookingId: id,
-                entityType: 'PARTNER',
-                partnerId: partner.id,
-                bookingCode: booking.bookingCode,
-                patientName: booking.patientName,
-                testName: 'Sample Collection & Investigation',
-                testAmount: testAmt,
-                commissionRate: commRate,
-                commissionAmount: commAmt,
-                paymentCycle: partner.paymentCycle || 'WEEKLY',
-                status: 'UNPAID',
-              }
+        // Record 30% commission ONLY for freelance phlebotomist (NOT for staff/employee)
+        if (!isEmployeeStaff) {
+          try {
+            const commRate = partner.commissionRate || 30.0;
+            const testAmt = booking.totalPaid || 0;
+            const commAmt = Math.round((testAmt * commRate) / 100);
+
+            const existingComm = await (prisma as any).referralCommission.findFirst({
+              where: { bookingId: id, entityType: 'PARTNER' }
             });
+
+            if (!existingComm) {
+              await (prisma as any).referralCommission.create({
+                data: {
+                  bookingId: id,
+                  entityType: 'PARTNER',
+                  partnerId: partner.id,
+                  bookingCode: booking.bookingCode,
+                  patientName: booking.patientName,
+                  testName: 'Sample Collection & Investigation',
+                  testAmount: testAmt,
+                  commissionRate: commRate,
+                  commissionAmount: commAmt,
+                  paymentCycle: partner.paymentCycle || 'WEEKLY',
+                  status: 'UNPAID',
+                }
+              });
+            }
+          } catch (commErr: any) {
+            console.error('Failed to create partner commission record:', commErr.message);
           }
-        } catch (commErr: any) {
-          console.error('Failed to create partner commission record:', commErr.message);
+        } else {
+          console.log(`[DELIVERED_TO_LAB] Collector ${collectorUserId} is in-house staff/employee phlebotomist. Skipping 30% commission record.`);
         }
       }
     }

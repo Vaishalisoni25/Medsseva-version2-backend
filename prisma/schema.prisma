@@ -1,5 +1,6 @@
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
 }
 
 datasource db {
@@ -343,6 +344,7 @@ model Report {
   doctorRegNo          String?
   doctorDesignation    String?
   doctorVerifiedAt     DateTime?
+  doctorSignatureUrl   String?
   booking              Booking          @relation(fields: [bookingId], references: [id])
   verifiedBy           User?            @relation("ReportVerifier", fields: [verifiedById], references: [id])
   reportBranch         Branch?          @relation("ReportBranch", fields: [reportBranchId], references: [id])

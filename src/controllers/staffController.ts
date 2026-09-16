@@ -126,9 +126,10 @@ export const createStaff = async (req: AuthRequest, res: Response) => {
       branchId,
       franchiseId,
       userType = 'EMPLOYEE',
+      signatureUrl,
     } = req.body;
 
-    console.log('[CREATE STAFF] Request received:', JSON.stringify({ name, email, department, designation, branchId }));
+    console.log('[CREATE STAFF] Request received:', JSON.stringify({ name, email, department, designation, branchId, signatureUrl: !!signatureUrl }));
 
     if (!name || !email) {
       return res.status(400).json({ error: 'Full Name and Email are required' });
@@ -208,6 +209,7 @@ export const createStaff = async (req: AuthRequest, res: Response) => {
         designation: designation || (isPhlebo ? 'Phlebotomist / Sample Collector' : 'Lab Technician'),
         branchId: targetBranchId,
         userType: isPhlebo ? 'STAFF' : (userType || 'EMPLOYEE'),
+        signatureUrl: signatureUrl || null,
         isActive: true,
       },
       include: {
@@ -286,6 +288,7 @@ export const updateStaff = async (req: AuthRequest, res: Response) => {
       branchId,
       franchiseId,
       isActive,
+      signatureUrl,
     } = req.body;
 
     const existingStaff = await (prisma.adminUser as any).findUnique({
@@ -319,6 +322,7 @@ export const updateStaff = async (req: AuthRequest, res: Response) => {
     if (franchiseId !== undefined) staffData.franchiseId = franchiseId || null;
     if (roleId !== undefined) staffData.roleId = roleId;
     if (isActive !== undefined) staffData.isActive = isActive;
+    if (signatureUrl !== undefined) staffData.signatureUrl = signatureUrl || null;
 
     const updated = await (prisma.adminUser as any).update({
       where: { id },
