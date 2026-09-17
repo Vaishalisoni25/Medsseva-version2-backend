@@ -58,6 +58,26 @@ export const getBookingsForReport = async (req: AuthRequest, res: Response) => {
   }
 };
 
+const resolveReportTechnician = (r: any) => {
+  let technicianName = r.technicianName || null;
+  let technicianQualification = r.technicianQualification || null;
+  let technicianSignatureUrl = r.technicianSignatureUrl || null;
+
+  if (!technicianName && r.internalNotes && r.internalNotes.includes('[TECH:')) {
+    try {
+      const match = r.internalNotes.match(/\[TECH:(\{.*?\})\]/);
+      if (match && match[1]) {
+        const parsed = JSON.parse(match[1]);
+        technicianName = parsed.name || technicianName;
+        technicianQualification = parsed.qualification || technicianQualification;
+        technicianSignatureUrl = parsed.signatureUrl || technicianSignatureUrl;
+      }
+    } catch (e) {}
+  }
+
+  return { technicianName, technicianQualification, technicianSignatureUrl };
+};
+
 export const getAllReports = async (req: AuthRequest, res: Response) => {
   try {
     const { branchId, status } = req.query;
@@ -101,17 +121,19 @@ export const getAllReports = async (req: AuthRequest, res: Response) => {
 
     const reportsWithAddress = await Promise.all(
       reports.map(async (r) => {
+        let address = null;
         if (r.booking?.addressId) {
-          const address = await prisma.address.findUnique({ where: { id: r.booking.addressId } });
-          return {
-            ...r,
-            booking: {
-              ...r.booking,
-              address: address || r.booking.user?.addresses?.[0] || null,
-            },
-          };
+          address = await prisma.address.findUnique({ where: { id: r.booking.addressId } });
         }
-        return r;
+        const tech = resolveReportTechnician(r);
+        return {
+          ...r,
+          ...tech,
+          booking: r.booking ? {
+            ...r.booking,
+            address: address || r.booking.user?.addresses?.[0] || null,
+          } : null,
+        };
       })
     );
 
@@ -170,8 +192,11 @@ export const getReportById = async (req: AuthRequest, res: Response) => {
       }
     }
 
+    const tech = resolveReportTechnician(report);
+
     const reportWithAddress = {
       ...report,
+      ...tech,
       doctorSignatureUrl: signatureUrl,
       booking: report.booking ? {
         ...report.booking,
@@ -193,6 +218,7 @@ export const createReport = async (req: AuthRequest, res: Response) => {
       parameters, recipientType, recipientId,
       reportBranchId, doctorName, doctorQualification, doctorRegNo, doctorDesignation, doctorVerifiedAt,
       doctorSignatureUrl,
+      technicianName, technicianQualification, technicianSignatureUrl,
     } = req.body;
 
     const existing = await prisma.report.findUnique({ where: { bookingId } });
@@ -202,6 +228,17 @@ export const createReport = async (req: AuthRequest, res: Response) => {
 
     const hasAbnormal = parameters.some((p: any) => p.isAbnormal);
 
+    let finalInternalNotes = internalNotes || '';
+    if (technicianName || technicianQualification || technicianSignatureUrl) {
+      const techJson = JSON.stringify({
+        name: technicianName || null,
+        qualification: technicianQualification || 'DMLT',
+        signatureUrl: technicianSignatureUrl || null,
+      });
+      finalInternalNotes = finalInternalNotes.replace(/\[TECH:\{.*?\}\]/g, '').trim();
+      finalInternalNotes = `${finalInternalNotes} [TECH:${techJson}]`.trim();
+    }
+
     const report = await (prisma as any).report.create({
       data: {
         bookingId,
@@ -209,7 +246,7 @@ export const createReport = async (req: AuthRequest, res: Response) => {
         clinicalNotes,
         technicianRemarks: technicianRemarks || null,
         doctorRemarks: doctorRemarks || null,
-        internalNotes: internalNotes || null,
+        internalNotes: finalInternalNotes || null,
         status: 'DRAFT',
         hasAbnormalFlags: hasAbnormal,
         recipientType: recipientType || 'USER',
@@ -221,6 +258,9 @@ export const createReport = async (req: AuthRequest, res: Response) => {
         doctorDesignation: doctorDesignation || null,
         doctorVerifiedAt: doctorVerifiedAt ? new Date(doctorVerifiedAt) : null,
         doctorSignatureUrl: doctorSignatureUrl || null,
+        technicianName: technicianName || null,
+        technicianQualification: technicianQualification || null,
+        technicianSignatureUrl: technicianSignatureUrl || null,
         parameters: {
           create: parameters.map((p: any) => ({
             parameterId: p.parameterId || undefined,
@@ -255,6 +295,7 @@ export const updateReportDraft = async (req: AuthRequest, res: Response) => {
       clinicalNotes, technicianRemarks, doctorRemarks, internalNotes, parameters,
       reportBranchId, doctorName, doctorQualification, doctorRegNo, doctorDesignation, doctorVerifiedAt,
       doctorSignatureUrl,
+      technicianName, technicianQualification, technicianSignatureUrl,
     } = req.body;
 
     const report = await prisma.report.findUnique({ where: { id } });
@@ -267,13 +308,30 @@ export const updateReportDraft = async (req: AuthRequest, res: Response) => {
 
     const hasAbnormal = parameters.some((p: any) => p.isAbnormal);
 
+    let finalInternalNotes = internalNotes !== undefined ? (internalNotes || '') : (report.internalNotes || '');
+    if (technicianName !== undefined || technicianQualification !== undefined || technicianSignatureUrl !== undefined) {
+      const existingTechMatch = finalInternalNotes.match(/\[TECH:(\{.*?\})\]/);
+      let existingTech = {};
+      if (existingTechMatch && existingTechMatch[1]) {
+        try { existingTech = JSON.parse(existingTechMatch[1]); } catch (e) {}
+      }
+      const techJson = JSON.stringify({
+        ...existingTech,
+        name: technicianName !== undefined ? (technicianName || null) : ((report as any).technicianName || null),
+        qualification: technicianQualification !== undefined ? (technicianQualification || 'DMLT') : ((report as any).technicianQualification || 'DMLT'),
+        signatureUrl: technicianSignatureUrl !== undefined ? (technicianSignatureUrl || null) : ((report as any).technicianSignatureUrl || null),
+      });
+      finalInternalNotes = finalInternalNotes.replace(/\[TECH:\{.*?\}\]/g, '').trim();
+      finalInternalNotes = `${finalInternalNotes} [TECH:${techJson}]`.trim();
+    }
+
     const updated = await (prisma as any).report.update({
       where: { id },
       data: {
         clinicalNotes,
         technicianRemarks: technicianRemarks || null,
         doctorRemarks: doctorRemarks || null,
-        internalNotes: internalNotes || null,
+        internalNotes: finalInternalNotes || null,
         hasAbnormalFlags: hasAbnormal,
         reportBranchId: reportBranchId || null,
         doctorName: doctorName || null,
@@ -282,6 +340,9 @@ export const updateReportDraft = async (req: AuthRequest, res: Response) => {
         doctorDesignation: doctorDesignation || null,
         doctorVerifiedAt: doctorVerifiedAt ? new Date(doctorVerifiedAt) : null,
         ...(doctorSignatureUrl !== undefined ? { doctorSignatureUrl: doctorSignatureUrl || null } : {}),
+        ...(technicianName !== undefined ? { technicianName: technicianName || null } : {}),
+        ...(technicianQualification !== undefined ? { technicianQualification: technicianQualification || null } : {}),
+        ...(technicianSignatureUrl !== undefined ? { technicianSignatureUrl: technicianSignatureUrl || null } : {}),
         parameters: {
           create: parameters.map((p: any) => ({
             parameterId: p.parameterId || undefined,

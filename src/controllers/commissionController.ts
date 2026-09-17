@@ -52,10 +52,7 @@ export const getDoctorPortalData = async (req: AuthRequest, res: Response) => {
       { referringDoctorId: doctor.id },
     ];
     if (doctor.userId) {
-      orConditions.push({ userId: doctor.userId });
-    }
-    if (doctor.branchId) {
-      orConditions.push({ branchId: doctor.branchId });
+      orConditions.push({ referringDoctorId: doctor.userId });
     }
 
     const bookingWhere: any = {
@@ -392,19 +389,74 @@ export const getPartnerPortalData = async (req: AuthRequest, res: Response) => {
 export const getAdminCommissions = async (req: AuthRequest, res: Response) => {
   try {
     const period = (req.query.period as string) || 'ALL';
+    const branchIdQuery = (req.query.branchId as string) || 'ALL';
+    const cityQuery = (req.query.city as string) || 'ALL';
     const periodStartDate = getPeriodStartDate(period);
 
-    const [doctors, partners, recentCommissions] = await Promise.all([
+    const isSuperAdmin = req.user?.isSuperAdmin || (req.user?.role || '').toUpperCase() === 'SUPER_ADMIN';
+    const userBranchId = req.user?.branchId;
+
+    // RBAC: Branch Admin is strictly locked to their assigned branch
+    let targetBranchId: string | null = null;
+    if (!isSuperAdmin && userBranchId) {
+      targetBranchId = userBranchId;
+    } else if (branchIdQuery && branchIdQuery !== 'ALL' && branchIdQuery !== 'all') {
+      targetBranchId = branchIdQuery;
+    }
+
+    const branches = await prisma.branch.findMany({
+      where: { isActive: true },
+      select: { id: true, name: true, city: true, code: true },
+      orderBy: { name: 'asc' },
+    });
+
+    const targetBranch = targetBranchId ? branches.find(b => b.id === targetBranchId) : null;
+    const targetCity = cityQuery && cityQuery !== 'ALL' && cityQuery !== 'all' ? cityQuery : (targetBranch?.city || null);
+
+    const [doctors, partners, executives, recentCommissions] = await Promise.all([
       (prisma as any).doctor.findMany({
-        where: { isActive: true },
+        where: {
+          isActive: true,
+          NOT: {
+            doctorType: 'IN_HOUSE',
+          },
+        },
         include: { branch: true },
         orderBy: { name: 'asc' },
       }),
       (prisma as any).pathologyPartner.findMany({
+        where: {
+          role: { not: 'PHLEBOTOMIST' },
+        },
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              mobile: true,
+              email: true,
+            },
+          },
+        },
         orderBy: { labName: 'asc' },
       }),
+      prisma.user.findMany({
+        where: {
+          role: 'EXECUTIVE',
+        },
+        include: {
+          adminUser: {
+            include: { branch: true, role: true },
+          },
+          pathologyPartner: true,
+        },
+        orderBy: { name: 'asc' },
+      }),
       (prisma as any).referralCommission.findMany({
-        where: periodStartDate ? { createdAt: { gte: periodStartDate } } : {},
+        where: {
+          ...(periodStartDate ? { createdAt: { gte: periodStartDate } } : {}),
+          ...(targetBranchId ? { booking: { branchId: targetBranchId } } : {}),
+        },
         orderBy: { createdAt: 'desc' },
         take: 100,
         include: { doctor: true, partner: true, booking: true },
@@ -414,10 +466,18 @@ export const getAdminCommissions = async (req: AuthRequest, res: Response) => {
     const doctorSummaries = await Promise.all(
       doctors.map(async (doc: any) => {
         const commRate = doc.commissionRate ?? 30.0;
+        const orConditions: any[] = [{ referringDoctorId: doc.id }];
+        if (doc.userId) orConditions.push({ referringDoctorId: doc.userId });
+
         const bWhere: any = {
-          OR: [{ referringDoctorId: doc.id }, { branchId: doc.branchId }],
+          OR: orConditions,
           status: { notIn: ['CANCELLED'] },
         };
+        if (targetBranchId) {
+          bWhere.branchId = targetBranchId;
+        } else if (targetCity) {
+          bWhere.branch = { city: { equals: targetCity, mode: 'insensitive' } };
+        }
         if (periodStartDate) bWhere.createdAt = { gte: periodStartDate };
 
         const bCount = await prisma.booking.count({ where: bWhere });
@@ -438,7 +498,7 @@ export const getAdminCommissions = async (req: AuthRequest, res: Response) => {
           specialization: doc.specialization,
           commissionRate: commRate,
           paymentCycle: doc.paymentCycle || 'MONTHLY',
-          branchName: doc.branch?.name || 'Main Lab',
+          branchName: doc.branch?.name || (targetBranch?.name ?? 'Referral Partner'),
           totalSamples: bCount,
           totalRevenue: Math.round(totalRevenue),
           totalCommission: Math.round(totalComm),
@@ -446,6 +506,68 @@ export const getAdminCommissions = async (req: AuthRequest, res: Response) => {
       })
     );
 
+    // Freelance Phlebotomists (registered from Collection Partner App)
+    const phlebotomistSummaries: any[] = [];
+    await Promise.all(
+      executives.map(async (e) => {
+        // Exclude salaried in-house staff (who are assigned to a physical lab branch with EMPLOYEE/STAFF status)
+        const isEmployeeStaff = !!(
+          e.adminUser &&
+          e.adminUser.branchId &&
+          (e.adminUser.userType === 'EMPLOYEE' || e.adminUser.userType === 'STAFF')
+        );
+
+        if (isEmployeeStaff) {
+          return;
+        }
+
+        const commRate = e.pathologyPartner?.commissionRate ?? 30.0;
+        const bWhere: any = {
+          OR: [
+            { assignedExecutiveId: e.id },
+            ...(e.pathologyPartner ? [{ assignedPartnerId: e.pathologyPartner.id }] : []),
+          ],
+          status: { notIn: ['CANCELLED', 'REJECTED'] },
+        };
+        if (targetBranchId) {
+          bWhere.branchId = targetBranchId;
+        } else if (targetCity) {
+          bWhere.branch = { city: { equals: targetCity, mode: 'insensitive' } };
+        }
+        if (periodStartDate) bWhere.createdAt = { gte: periodStartDate };
+
+        const bCount = await prisma.booking.count({ where: bWhere });
+        const bAggregate = await prisma.booking.aggregate({
+          where: bWhere,
+          _sum: { totalPaid: true },
+        });
+
+        const totalRevenue = bAggregate._sum.totalPaid || 0;
+        const totalComm = (totalRevenue * commRate) / 100;
+
+        const phleboServiceArea = e.adminUser?.department || e.pathologyPartner?.address || e.pathologyPartner?.city || 'Field Collector';
+
+        phlebotomistSummaries.push({
+          id: e.pathologyPartner?.id || e.id,
+          userId: e.id,
+          entityType: 'PHLEBOTOMIST',
+          name: e.name || e.pathologyPartner?.labName || 'Freelance Phlebotomist',
+          code: e.pathologyPartner?.partnerCode || `PHLEBO-${e.id.slice(0, 5).toUpperCase()}`,
+          mobile: e.mobile || '',
+          email: e.email || '',
+          qualification: e.adminUser?.qualification || 'Freelance Phlebotomist',
+          specialization: 'Home Sample Collection (30% Commission)',
+          commissionRate: commRate,
+          paymentCycle: e.pathologyPartner?.paymentCycle || 'WEEKLY',
+          branchName: phleboServiceArea,
+          totalSamples: bCount,
+          totalRevenue: Math.round(totalRevenue),
+          totalCommission: Math.round(totalComm),
+        });
+      })
+    );
+
+    // Tie-up Diagnostic Partners & Centers
     const partnerSummaries = await Promise.all(
       partners.map(async (p: any) => {
         const commRate = p.commissionRate ?? 30.0;
@@ -453,6 +575,11 @@ export const getAdminCommissions = async (req: AuthRequest, res: Response) => {
           assignedPartnerId: p.id,
           status: { notIn: ['CANCELLED', 'REJECTED'] },
         };
+        if (targetBranchId) {
+          bWhere.branchId = targetBranchId;
+        } else if (targetCity) {
+          bWhere.branch = { city: { equals: targetCity, mode: 'insensitive' } };
+        }
         if (periodStartDate) bWhere.createdAt = { gte: periodStartDate };
 
         const bCount = await prisma.booking.count({ where: bWhere });
@@ -473,7 +600,7 @@ export const getAdminCommissions = async (req: AuthRequest, res: Response) => {
           specialization: 'Diagnostic Tie-up',
           commissionRate: commRate,
           paymentCycle: p.paymentCycle || 'MONTHLY',
-          branchName: p.address || 'Tie-up Lab Center',
+          branchName: p.address || p.city || 'Tie-up Lab Center',
           totalSamples: bCount,
           totalRevenue: Math.round(totalRevenue),
           totalCommission: Math.round(totalComm),
@@ -481,9 +608,18 @@ export const getAdminCommissions = async (req: AuthRequest, res: Response) => {
       })
     );
 
+    phlebotomistSummaries.sort((a, b) => a.name.localeCompare(b.name));
+    partnerSummaries.sort((a, b) => a.name.localeCompare(b.name));
+
     res.json({
       period,
+      branchId: targetBranchId || 'ALL',
+      city: targetCity || 'ALL',
+      isSuperAdmin,
+      userBranchId: userBranchId || null,
+      branches,
       doctors: doctorSummaries,
+      phlebotomists: phlebotomistSummaries,
       partners: partnerSummaries,
       recentCommissions,
     });
@@ -511,7 +647,7 @@ export const updateCommissionConfig = async (req: AuthRequest, res: Response) =>
         data: dataToUpdate,
       });
       return res.json({ success: true, doctor: updated });
-    } else if (entityType === 'PARTNER') {
+    } else if (entityType === 'PARTNER' || entityType === 'PHLEBOTOMIST') {
       const dataToUpdate: any = {};
       if (commissionRate !== undefined) dataToUpdate.commissionRate = Number(commissionRate);
       if (paymentCycle) dataToUpdate.paymentCycle = paymentCycle;
@@ -519,13 +655,37 @@ export const updateCommissionConfig = async (req: AuthRequest, res: Response) =>
       if (loginId) dataToUpdate.loginId = loginId;
       if (password) dataToUpdate.password = password;
 
-      const updated = await (prisma as any).pathologyPartner.update({
-        where: { id },
-        data: dataToUpdate,
-      });
-      return res.json({ success: true, partner: updated });
+      let partner = await (prisma as any).pathologyPartner.findUnique({ where: { id } });
+      if (!partner) {
+        partner = await (prisma as any).pathologyPartner.findFirst({ where: { userId: id } });
+      }
+
+      if (partner) {
+        const updated = await (prisma as any).pathologyPartner.update({
+          where: { id: partner.id },
+          data: dataToUpdate,
+        });
+        return res.json({ success: true, partner: updated });
+      } else {
+        const user = await prisma.user.findUnique({ where: { id } });
+        if (user) {
+          const created = await (prisma as any).pathologyPartner.create({
+            data: {
+              userId: user.id,
+              labName: `${user.name} (Phlebotomist)`,
+              role: 'PHLEBOTOMIST',
+              partnerCode: code || `PHLEBO-${user.id.slice(0, 5).toUpperCase()}`,
+              commissionRate: commissionRate !== undefined ? Number(commissionRate) : 30.0,
+              paymentCycle: paymentCycle || 'WEEKLY',
+              approvalStatus: 'APPROVED',
+            }
+          });
+          return res.json({ success: true, partner: created });
+        }
+        return res.status(404).json({ error: 'Partner or Phlebotomist profile not found' });
+      }
     } else {
-      return res.status(400).json({ error: 'Invalid entityType. Must be DOCTOR or PARTNER.' });
+      return res.status(400).json({ error: 'Invalid entityType. Must be DOCTOR, PARTNER, or PHLEBOTOMIST.' });
     }
   } catch (error: any) {
     console.error('Error updating commission config:', error);

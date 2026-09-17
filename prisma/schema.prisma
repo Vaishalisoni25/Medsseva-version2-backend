@@ -345,6 +345,9 @@ model Report {
   doctorDesignation    String?
   doctorVerifiedAt     DateTime?
   doctorSignatureUrl   String?
+  technicianName       String?
+  technicianQualification String?
+  technicianSignatureUrl String?
   booking              Booking          @relation(fields: [bookingId], references: [id])
   verifiedBy           User?            @relation("ReportVerifier", fields: [verifiedById], references: [id])
   reportBranch         Branch?          @relation("ReportBranch", fields: [reportBranchId], references: [id])
@@ -449,6 +452,7 @@ model Doctor {
   partnerId       String?
   commissionRate  Float     @default(30.0)
   paymentCycle    String    @default("MONTHLY")
+  doctorType      String?   @default("REFERRAL")
   approvalStatus  PartnerApprovalStatus @default(PENDING)
   rejectionReason String?
   isActive        Boolean   @default(false)

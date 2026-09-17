@@ -83,6 +83,7 @@ export const registerDoctor = async (req: Request, res: Response) => {
         designation: designation ? designation.trim() : 'Consulting Doctor',
         approvalStatus: 'PENDING',
         isActive: false,
+        doctorType: 'REFERRAL',
       }
     });
 
@@ -365,7 +366,7 @@ export const registerPhlebotomist = async (req: Request, res: Response) => {
         partnerCode: `PHLEBO-${user.id.slice(0, 5).toUpperCase()}`,
         address: address ? address.trim() : (serviceArea ? serviceArea.trim() : 'Independent Collection Partner'),
         approvalStatus: 'PENDING',
-        commissionRate: 15,
+        commissionRate: 30,
         paymentCycle: 'WEEKLY',
         isAvailable: false,
       }
@@ -949,6 +950,7 @@ export const createAdminUser = async (req: Request, res: Response) => {
             partnerId: partnerId || null,
             approvalStatus: 'PENDING',
             isActive: false,
+            doctorType: 'IN_HOUSE',
           },
         });
       } catch (docErr) {
@@ -973,7 +975,7 @@ export const createAdminUser = async (req: Request, res: Response) => {
           partnerCode: `PHLEBO-${user.id.slice(0, 5).toUpperCase()}`,
           address: department || 'Collection Operations',
           approvalStatus: 'APPROVED',
-          commissionRate: 15,
+          commissionRate: 30,
           paymentCycle: 'WEEKLY',
           isAvailable: true,
           branchId: targetBranchId,

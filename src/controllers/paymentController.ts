@@ -42,9 +42,23 @@ const pricing = await pricingService.calculate({
 
 export const createPaymentOrder = async (req: any, res: Response) => {
   try {
-    const { testIds = [], packageIds = [], collectionMode: bodyCollectionMode, couponCode, bookingId } = req.body;
+    const {
+      testIds = [],
+      packageIds = [],
+      collectionMode: bodyCollectionMode,
+      couponCode,
+      bookingId,
+      patientName,
+      patientAge,
+      patientGender,
+      mobile,
+      addressId,
+      branchId,
+      scheduledDate,
+      scheduledSlot,
+    } = req.body;
 
-if (bookingId) {
+    if (bookingId) {
       const existingBooking = await prisma.booking.findUnique({
         where: { id: bookingId },
         select: { collectionMode: true, totalPaid: true, userId: true },
@@ -89,6 +103,14 @@ if (bookingId) {
       collectionMode: collectionMode === 'lab' ? 'LAB' : 'HOME',
       couponCode,
       ipAddress: getIp(req),
+      scheduledDate,
+      scheduledSlot,
+      patientName,
+      patientAge: patientAge ? Number(patientAge) : undefined,
+      patientGender,
+      mobile,
+      addressId,
+      branchId,
     });
 
     res.json({

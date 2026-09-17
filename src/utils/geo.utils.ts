@@ -22,14 +22,14 @@ export function calculateDistanceKm(
 }
 
 /**
- * Filter items by service radius (default 15 km).
+ * Filter items by service radius (default 3 km).
  */
 export function isWithinServiceRadius(
   userLat: number | null | undefined,
   userLon: number | null | undefined,
   targetLat: number | null | undefined,
   targetLon: number | null | undefined,
-  radiusKm = 15
+  radiusKm = 3
 ): boolean {
   if (
     userLat === null ||

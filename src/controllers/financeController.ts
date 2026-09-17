@@ -268,6 +268,7 @@ export const getPaymentSummary = async (req: Request, res: Response) => {
 
     res.json({
       totalCollected: totalCaptured._sum.amount || 0,
+      totalCaptured: totalCaptured._sum.amount || 0,
       totalPending: totalPending._sum.amount || 0,
       totalRefunded: totalRefunded._sum.amount || 0,
       pendingSettlements: totalSettlementsPending._sum.commissionAmount || 0,
@@ -296,13 +297,36 @@ export const getPayments = async (req: Request, res: Response) => {
         skip,
         take: parseInt(limit as string),
         orderBy: { createdAt: 'desc' },
-    include: {
+        include: {
           booking: {
-            select: {
-              bookingCode: true,
-              patientName: true,
-              id: true,
-              branch: { select: { name: true } },
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  name: true,
+                  uhid: true,
+                  mobile: true,
+                  email: true,
+                  addresses: true,
+                },
+              },
+              tests: {
+                include: {
+                  test: true,
+                },
+              },
+              packages: {
+                include: {
+                  package: true,
+                },
+              },
+              branch: {
+                select: {
+                  id: true,
+                  name: true,
+                  city: true,
+                },
+              },
             },
           },
         },
@@ -321,7 +345,37 @@ export const getPaymentById = async (req: Request, res: Response) => {
     const payment = await prisma.payment.findUnique({
       where: { id: req.params.id },
       include: {
-        booking: { select: { bookingCode: true, patientName: true, patientMobile: true } },
+        booking: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                uhid: true,
+                mobile: true,
+                email: true,
+                addresses: true,
+              },
+            },
+            tests: {
+              include: {
+                test: true,
+              },
+            },
+            packages: {
+              include: {
+                package: true,
+              },
+            },
+            branch: {
+              select: {
+                id: true,
+                name: true,
+                city: true,
+              },
+            },
+          },
+        },
         refunds: true,
         financeAuditLogs: { orderBy: { createdAt: 'desc' } },
       },

@@ -96,7 +96,7 @@ export const getPartnerNotifications = async (req: any, res: Response) => {
   try {
     let collectorLat: number | null = null;
     let collectorLon: number | null = null;
-    let radiusKm = 15;
+    let radiusKm = 3;
     let partnerId: string | null = null;
 
     const partner = await getOrFindPartner(req.user.id, req.user.role);
@@ -104,7 +104,7 @@ export const getPartnerNotifications = async (req: any, res: Response) => {
     if (partner) {
       collectorLat = partner.latitude;
       collectorLon = partner.longitude;
-      radiusKm = (partner as any).radiusKm || 15;
+      radiusKm = (partner as any).radiusKm || 3;
       partnerId = partner.id;
     }
 
@@ -181,7 +181,7 @@ export const acceptBooking = async (req: any, res: Response) => {
       const addrLon = address ? (address as any).longitude : null;
       const collectorLat = partner ? partner.latitude : null;
       const collectorLon = partner ? partner.longitude : null;
-      const radiusKm = partner ? ((partner as any).radiusKm || 15) : 15;
+      const radiusKm = partner ? ((partner as any).radiusKm || 3) : 3;
 
       if (addrLat && addrLon && collectorLat && collectorLon) {
         const withinRadius = isWithinServiceRadius(addrLat, addrLon, collectorLat, collectorLon, radiusKm);

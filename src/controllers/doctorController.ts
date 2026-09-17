@@ -114,6 +114,7 @@ export const createDoctor = async (req: AuthRequest, res: Response) => {
       userId,
       approvalStatus = 'PENDING',
       isActive = false,
+      doctorType,
     } = req.body;
 
     if (!name || !qualification || !registrationNo) {
@@ -121,6 +122,7 @@ export const createDoctor = async (req: AuthRequest, res: Response) => {
     }
 
     const targetBranchId = branchId || (!req.user?.isSuperAdmin ? req.user?.branchId : null) || null;
+    const finalDoctorType = doctorType || (targetBranchId ? 'IN_HOUSE' : 'REFERRAL');
 
     const doctor = await (prisma as any).doctor.create({
       data: {
@@ -137,6 +139,7 @@ export const createDoctor = async (req: AuthRequest, res: Response) => {
         userId: userId || null,
         approvalStatus,
         isActive,
+        doctorType: finalDoctorType,
       },
       include: { branch: true },
     });
@@ -168,6 +171,7 @@ export const updateDoctor = async (req: AuthRequest, res: Response) => {
       commissionRate,
       paymentCycle,
       password,
+      doctorType,
     } = req.body;
 
     const data: any = {};
@@ -186,6 +190,7 @@ export const updateDoctor = async (req: AuthRequest, res: Response) => {
     if (rejectionReason !== undefined) data.rejectionReason = rejectionReason;
     if (commissionRate !== undefined) data.commissionRate = Number(commissionRate);
     if (paymentCycle !== undefined) data.paymentCycle = paymentCycle;
+    if (doctorType !== undefined) data.doctorType = doctorType;
 
     if (password) {
       const hashedPassword = await bcrypt.hash(password, 10);
