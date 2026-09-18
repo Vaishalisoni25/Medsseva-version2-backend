@@ -36,7 +36,7 @@ export const getDoctorPortalData = async (req: AuthRequest, res: Response) => {
         where: {
           OR: [{ userId }, { id: userId }],
         },
-        include: { branch: true },
+        include: { branch: true, user: { select: { avatarUrl: true } } },
       });
     }
 
@@ -75,6 +75,8 @@ export const getDoctorPortalData = async (req: AuthRequest, res: Response) => {
         report: { select: { id: true, status: true, pdfUrl: true, reportedDate: true } },
         branch: { select: { id: true, name: true, city: true } },
         user: { select: { name: true, mobile: true, uhid: true } },
+        statusTimeline: { orderBy: { createdAt: 'asc' } },
+        assignedPartner: { select: { labName: true } },
       },
       orderBy: { createdAt: 'desc' },
       take: 100,
@@ -176,6 +178,10 @@ export const getDoctorPortalData = async (req: AuthRequest, res: Response) => {
           : null,
         branch: b.branch,
         createdAt: b.createdAt,
+        collectionMode: b.collectionMode,
+        collectionOtp: b.collectionOtp,
+        statusTimeline: (b as any).statusTimeline,
+        assignedPartner: (b as any).assignedPartner,
       };
     });
 
@@ -191,6 +197,7 @@ export const getDoctorPortalData = async (req: AuthRequest, res: Response) => {
         commissionRate,
         paymentCycle,
         branch: doctor.branch,
+        avatarUrl: doctor.user?.avatarUrl || null,
       },
       period,
       summary: {

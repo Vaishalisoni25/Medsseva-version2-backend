@@ -102,6 +102,9 @@ export const getPartnerNotifications = async (req: any, res: Response) => {
     const partner = await getOrFindPartner(req.user.id, req.user.role);
 
     if (partner) {
+      if (!partner.isAvailable) {
+        return res.json([]);
+      }
       collectorLat = partner.latitude;
       collectorLon = partner.longitude;
       radiusKm = (partner as any).radiusKm || 15;
