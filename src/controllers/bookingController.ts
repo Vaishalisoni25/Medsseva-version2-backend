@@ -342,14 +342,14 @@ const user = await prisma.user.findUnique({ where: { id: req.user.id } });
         },
       });
 
-      if (pricing.couponId && pricing.couponId !== 'REFERRAL_FREE_TEST') {
+      if (pricing.couponId && !pricing.couponId.startsWith('REFERRAL_')) {
         await tx.coupon.update({ where: { id: pricing.couponId }, data: { usedCount: { increment: 1 } } });
         await tx.couponRedemption.create({
           data: { couponId: pricing.couponId, userId: user.id, bookingId: newBooking.id, discount: pricing.couponDiscount },
         });
       }
 
-      if (pricing.couponId === 'REFERRAL_FREE_TEST' || (user.isFirstTestFreeEligible && !user.firstTestFreeUsed)) {
+      if (pricing.couponId === 'REFERRAL_50_DISCOUNT' || pricing.couponId === 'REFERRAL_FREE_TEST' || (user.isFirstTestFreeEligible && !user.firstTestFreeUsed)) {
         await tx.user.update({
           where: { id: user.id },
           data: { firstTestFreeUsed: true },

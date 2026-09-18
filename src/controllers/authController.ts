@@ -452,6 +452,9 @@ export const register = async (req: Request, res: Response) => {
       if (!referrer) {
         return res.status(400).json({ error: 'Invalid referral code entered. Please check the code or leave it empty.' });
       }
+      if (referrer.mobile === mobile || (email && referrer.email === email)) {
+        return res.status(400).json({ error: 'You cannot use your own referral code.' });
+      }
       referredById = referrer.id;
       isFirstTestFreeEligible = true;
     }

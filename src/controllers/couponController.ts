@@ -210,20 +210,22 @@ export const validateCoupon = async (req: Request, res: Response) => {
             return res.status(400).json({ valid: false, error: 'Referral code discount is only valid for your first lab test' });
           }
         }
-        const numericCartTotal = parseFloat(cartTotal);
+        const numericCartTotal = parseFloat(cartTotal) || 0;
+        const discount = Math.round(numericCartTotal * 0.5 * 100) / 100;
+        const finalAmount = Math.max(0, Math.round((numericCartTotal - discount) * 100) / 100);
         return res.json({
           valid: true,
           code: referralUser.referralCode || code.toUpperCase(),
-          discount: numericCartTotal,
-          finalAmount: 0,
-          description: 'First Lab Test 100% Free via Referral!',
+          discount,
+          finalAmount,
+          description: 'First Lab Test 50% Discount via Referral!',
           coupon: {
-            id: 'REFERRAL_FREE_TEST',
+            id: 'REFERRAL_50_DISCOUNT',
             code: referralUser.referralCode || code.toUpperCase(),
-            name: 'First Test Free Referral',
+            name: 'First Lab Test 50% Referral Discount',
             discountType: 'PERCENTAGE',
-            discountValue: 100,
-            description: 'Get your first lab test free with referral code',
+            discountValue: 50,
+            description: 'Get 50% discount on your first lab test with referral code',
           },
         });
       }

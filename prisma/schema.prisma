@@ -1287,6 +1287,7 @@ model CmsBanner {
   description   String?
   imageUrl      String
   imagePublicId String?
+  bannerType    String    @default("HERO")
   linkType      String    @default("Package")
   linkValue     String?
   priority      Int       @default(0)

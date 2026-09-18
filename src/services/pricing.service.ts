@@ -124,12 +124,12 @@ export class PricingService {
       resolvedCouponCode = couponResult.code;
       resolvedCouponId = couponResult.couponId;
     } else if (userId) {
-      // Check if user is eligible for first test free via referral
+      // Check if user is eligible for 50% discount on first test via referral
       const user = await prisma.user.findUnique({ where: { id: userId } });
       if (user && user.isFirstTestFreeEligible && !user.firstTestFreeUsed) {
-        couponDiscount = priceAfterItemDiscount; // 100% discount on test amount
-        resolvedCouponCode = 'FIRST_TEST_FREE';
-        resolvedCouponId = 'REFERRAL_FREE_TEST';
+        couponDiscount = Math.round(priceAfterItemDiscount * 0.5 * 100) / 100; // 50% discount on first lab test
+        resolvedCouponCode = 'FIRST_TEST_50_OFF';
+        resolvedCouponId = 'REFERRAL_50_DISCOUNT';
       }
     }
 
@@ -188,10 +188,11 @@ export class PricingService {
             throw new Error('Referral code discount is only valid for your first lab test.');
           }
         }
+        const referralDiscount = Math.round(cartTotal * 0.5 * 100) / 100;
         return {
-          discount: cartTotal,
+          discount: referralDiscount,
           code: referralUser.referralCode || code,
-          couponId: 'REFERRAL_FREE_TEST',
+          couponId: 'REFERRAL_50_DISCOUNT',
         };
       }
       throw new Error('Coupon or referral code is invalid.');

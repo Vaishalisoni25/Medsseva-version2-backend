@@ -20,7 +20,15 @@ const logCmsAction = async (
 
 export const getBanners = async (req: AuthRequest, res: Response) => {
   try {
-    const banners = await prisma.cmsBanner.findMany({ orderBy: { displayOrder: 'asc' } });
+    const { type } = req.query;
+    const where: any = {};
+    if (type && typeof type === 'string') {
+      where.bannerType = type.toUpperCase();
+    }
+    const banners = await prisma.cmsBanner.findMany({
+      where,
+      orderBy: { displayOrder: 'asc' },
+    });
     res.json({ banners });
   } catch {
     res.status(500).json({ error: 'Failed to fetch banners' });
@@ -29,12 +37,33 @@ export const getBanners = async (req: AuthRequest, res: Response) => {
 
 export const createBanner = async (req: AuthRequest, res: Response) => {
   try {
-    const { title, subtitle, description, imageUrl, imagePublicId, linkType, linkValue, priority, displayOrder, startDate, endDate, cities, branches } = req.body;
+    const {
+      title,
+      subtitle,
+      description,
+      imageUrl,
+      imagePublicId,
+      bannerType,
+      linkType,
+      linkValue,
+      priority,
+      displayOrder,
+      startDate,
+      endDate,
+      cities,
+      branches,
+    } = req.body;
     if (!title || !imageUrl) return res.status(400).json({ error: 'title and imageUrl are required' });
     const banner = await prisma.cmsBanner.create({
       data: {
-        title, subtitle, description, imageUrl, imagePublicId,
-        linkType: linkType || 'Package', linkValue,
+        title,
+        subtitle,
+        description,
+        imageUrl,
+        imagePublicId,
+        bannerType: bannerType ? String(bannerType).toUpperCase() : 'HERO',
+        linkType: linkType || 'Package',
+        linkValue,
         priority: priority || 0,
         displayOrder: displayOrder || 0,
         startDate: startDate ? new Date(startDate) : null,
@@ -45,10 +74,11 @@ export const createBanner = async (req: AuthRequest, res: Response) => {
         createdById: req.user?.id,
       },
     });
-    await logCmsAction(req.user?.id, req.user?.role, 'BANNER_CREATED', 'CmsBanner', banner.id, { title });
+    await logCmsAction(req.user?.id, req.user?.role, 'BANNER_CREATED', 'CmsBanner', banner.id, { title, bannerType: banner.bannerType });
     res.status(201).json({ banner });
-  } catch {
-    res.status(500).json({ error: 'Failed to create banner' });
+  } catch (error: any) {
+    console.error('CREATE BANNER ERROR:', error);
+    res.status(500).json({ error: 'Failed to create banner', details: error?.message });
   }
 };
 
@@ -56,6 +86,7 @@ export const updateBanner = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
     const data = req.body;
+    if (data.bannerType) data.bannerType = String(data.bannerType).toUpperCase();
     if (data.startDate) data.startDate = new Date(data.startDate);
     if (data.endDate) data.endDate = new Date(data.endDate);
     const banner = await prisma.cmsBanner.update({ where: { id }, data });
