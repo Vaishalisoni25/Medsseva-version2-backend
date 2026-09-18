@@ -7,7 +7,8 @@
     "start": "node dist/server.js",
     "build": "tsc",
     "postinstall": "prisma generate",
-    "seed": "prisma db seed"
+    "seed": "prisma db seed",
+    "db:push": "prisma db push --accept-data-loss"
   },
   "dependencies": {
     "@google/genai": "^2.12.0",

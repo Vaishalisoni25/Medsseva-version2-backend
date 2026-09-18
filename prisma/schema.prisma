@@ -274,6 +274,7 @@ sampleDelivery       SampleDelivery?
   bookingIntent        BookingIntent?
   partnerRating        PartnerRating?
   referringDoctorId    String?
+  referringDoctor      Doctor?             @relation("ReferringDoctor", fields: [referringDoctorId], references: [id])
   referralCommission   Float?              @default(0)
   commissions          ReferralCommission[]
 }
@@ -450,9 +451,9 @@ model Doctor {
   branchId        String?
   cityId          String?
   partnerId       String?
+  doctorType      DoctorType @default(EMPLOYEE)
   commissionRate  Float     @default(30.0)
   paymentCycle    String    @default("MONTHLY")
-  doctorType      String?   @default("REFERRAL")
   approvalStatus  PartnerApprovalStatus @default(PENDING)
   rejectionReason String?
   isActive        Boolean   @default(false)
@@ -461,6 +462,7 @@ model Doctor {
   user            User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
   branch          Branch?   @relation(fields: [branchId], references: [id], onDelete: SetNull)
   commissions     ReferralCommission[]
+  referredBookings Booking[] @relation("ReferringDoctor")
 }
 model AuditLog {
   id              String   @id @default(uuid())
@@ -562,6 +564,15 @@ enum ReportStatus {
   UNDER_REVIEW
   APPROVED
   RELEASED
+  PENDING_VERIFICATION
+  VERIFIED
+  PUBLISHED
+  CANCELLED
+}
+
+enum DoctorType {
+  DIRECT
+  EMPLOYEE
 }
 
 model ReportAuditLog {

@@ -122,7 +122,6 @@ export const createDoctor = async (req: AuthRequest, res: Response) => {
     }
 
     const targetBranchId = branchId || (!req.user?.isSuperAdmin ? req.user?.branchId : null) || null;
-    const finalDoctorType = doctorType || (targetBranchId ? 'IN_HOUSE' : 'REFERRAL');
 
     const doctor = await (prisma as any).doctor.create({
       data: {
@@ -139,7 +138,7 @@ export const createDoctor = async (req: AuthRequest, res: Response) => {
         userId: userId || null,
         approvalStatus,
         isActive,
-        doctorType: finalDoctorType,
+        doctorType: (req.body as any).doctorType || 'EMPLOYEE',
       },
       include: { branch: true },
     });
