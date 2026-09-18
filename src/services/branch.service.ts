@@ -5,12 +5,43 @@ export const branchService = {
     isActive?: string;
     homeCollection?: string;
     labVisit?: string;
+    lat?: string;
+    lng?: string;
   }) => {
     const filters: any = {};
     if (query.isActive !== undefined) filters.isActive = query.isActive === 'true';
     if (query.homeCollection === 'true') filters.homeCollection = true;
     if (query.labVisit === 'true') filters.labVisit = true;
-    return branchRepository.findAll(filters);
+    
+    let branches = await branchRepository.findAll(filters);
+
+    if (query.lat && query.lng) {
+      const lat1 = parseFloat(query.lat);
+      const lon1 = parseFloat(query.lng);
+
+      const toRad = (value: number) => (value * Math.PI) / 180;
+      
+      const calcDistance = (lat2: number, lon2: number) => {
+        const R = 6371; // km
+        const dLat = toRad(lat2 - lat1);
+        const dLon = toRad(lon2 - lon1);
+        const a =
+          Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+          Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+          Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return R * c;
+      };
+
+      branches = branches.map((b: any) => {
+        if (b.latitude && b.longitude) {
+          return { ...b, distance: calcDistance(b.latitude, b.longitude) };
+        }
+        return { ...b, distance: 999999 }; // put branches without coordinates at the end
+      }).sort((a: any, b: any) => (a.distance || 0) - (b.distance || 0));
+    }
+
+    return branches;
   },
 
 getBranchById: async (id: string) => {

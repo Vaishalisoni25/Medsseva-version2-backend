@@ -137,6 +137,7 @@ export const createDoctor = async (req: AuthRequest, res: Response) => {
         userId: userId || null,
         approvalStatus,
         isActive,
+        doctorType: (req.body as any).doctorType || 'EMPLOYEE',
       },
       include: { branch: true },
     });

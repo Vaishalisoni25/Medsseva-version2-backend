@@ -396,7 +396,7 @@ export const getAdminCommissions = async (req: AuthRequest, res: Response) => {
 
     const [doctors, partners, recentCommissions] = await Promise.all([
       (prisma as any).doctor.findMany({
-        where: { isActive: true },
+        where: { isActive: true, doctorType: 'DIRECT' },
         include: { branch: true },
         orderBy: { name: 'asc' },
       }),
