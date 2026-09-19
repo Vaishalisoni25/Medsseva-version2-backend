@@ -29,11 +29,12 @@ export const getBanners = async (req: AuthRequest, res: Response) => {
 
 export const createBanner = async (req: AuthRequest, res: Response) => {
   try {
-    const { title, subtitle, description, imageUrl, imagePublicId, linkType, linkValue, priority, displayOrder, startDate, endDate, cities, branches } = req.body;
+    const { title, subtitle, description, imageUrl, imagePublicId, linkType, linkValue, priority, displayOrder, startDate, endDate, cities, branches, bannerType } = req.body;
     if (!title || !imageUrl) return res.status(400).json({ error: 'title and imageUrl are required' });
     const banner = await prisma.cmsBanner.create({
       data: {
         title, subtitle, description, imageUrl, imagePublicId,
+        bannerType: bannerType || 'HERO',
         linkType: linkType || 'Package', linkValue,
         priority: priority || 0,
         displayOrder: displayOrder || 0,
