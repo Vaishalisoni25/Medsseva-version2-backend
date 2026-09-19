@@ -21,7 +21,13 @@ const logCmsAction = async (
 export const getBanners = async (req: AuthRequest, res: Response) => {
   try {
     const banners = await prisma.cmsBanner.findMany({ orderBy: { displayOrder: 'asc' } });
-    res.json({ banners });
+    const mappedBanners = banners.map(b => {
+      if (b.title.startsWith('[PROMO]')) {
+        return { ...b, title: b.title.replace('[PROMO]', '').trim(), bannerType: 'PROMO' };
+      }
+      return { ...b, bannerType: 'HERO' };
+    });
+    res.json({ banners: mappedBanners });
   } catch {
     res.status(500).json({ error: 'Failed to fetch banners' });
   }
@@ -31,10 +37,10 @@ export const createBanner = async (req: AuthRequest, res: Response) => {
   try {
     const { title, subtitle, description, imageUrl, imagePublicId, linkType, linkValue, priority, displayOrder, startDate, endDate, cities, branches, bannerType } = req.body;
     if (!title || !imageUrl) return res.status(400).json({ error: 'title and imageUrl are required' });
+    const finalTitle = bannerType === 'PROMO' ? `[PROMO] ${title}` : title;
     const banner = await prisma.cmsBanner.create({
       data: {
-        title, subtitle, description, imageUrl, imagePublicId,
-        bannerType: bannerType || 'HERO',
+        title: finalTitle, subtitle, description, imageUrl, imagePublicId,
         linkType: linkType || 'Package', linkValue,
         priority: priority || 0,
         displayOrder: displayOrder || 0,
@@ -48,8 +54,9 @@ export const createBanner = async (req: AuthRequest, res: Response) => {
     });
     await logCmsAction(req.user?.id, req.user?.role, 'BANNER_CREATED', 'CmsBanner', banner.id, { title });
     res.status(201).json({ banner });
-  } catch {
-    res.status(500).json({ error: 'Failed to create banner' });
+  } catch (error: any) {
+    console.error('BANNER CREATE ERROR:', error);
+    res.status(500).json({ error: 'Failed to create banner', details: error.message });
   }
 };
 
@@ -57,6 +64,14 @@ export const updateBanner = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
     const data = req.body;
+    if (data.bannerType !== undefined) {
+      if (data.bannerType === 'PROMO') {
+        if (data.title && !data.title.startsWith('[PROMO]')) data.title = `[PROMO] ${data.title}`;
+      } else {
+        if (data.title && data.title.startsWith('[PROMO]')) data.title = data.title.replace('[PROMO]', '').trim();
+      }
+      delete data.bannerType;
+    }
     if (data.startDate) data.startDate = new Date(data.startDate);
     if (data.endDate) data.endDate = new Date(data.endDate);
     const banner = await prisma.cmsBanner.update({ where: { id }, data });
