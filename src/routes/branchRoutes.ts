@@ -6,11 +6,13 @@ import {
   updateBranch,
   deleteBranch,
   toggleBranchStatus,
+  getAdminLocations,
 } from '../controllers/branch.controller';
 import { authenticate, authorizeRoles } from '../middlewares/authMiddleware';
 
 const router = Router();
 
+router.get('/admin-locations', authenticate, authorizeRoles('ADMIN', 'SUPER_ADMIN'), getAdminLocations);
 router.get('/', getAllBranches);
 router.get('/:id', getBranchById);
 

@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { branchService } from '../services/branch.service';
-
+import { AuthRequest } from '../middlewares/authMiddleware';
+import { prisma } from '../lib/prisma';
 export const getAllBranches = async (req: Request, res: Response) => {
   try {
     const branches = await branchService.getAllBranches(req.query as any);
@@ -57,5 +58,44 @@ export const toggleBranchStatus = async (req: Request, res: Response) => {
     res.json({ success: true, data: branch });
   } catch (err: any) {
     res.status(400).json({ success: false, message: err.message });
+  }
+};
+
+export const getAdminLocations = async (req: AuthRequest, res: Response) => {
+  try {
+    const isSuperAdmin = req.user?.isSuperAdmin || (req.user?.role || '').toUpperCase() === 'SUPER_ADMIN';
+    const userBranchId = req.user?.branchId;
+    const userPartnerId = req.user?.partnerId;
+
+    let locations: any[] = [];
+
+    if (isSuperAdmin) {
+      // Super Admin sees all branches and all partner labs
+      const branches = await prisma.branch.findMany({ where: { isActive: true } });
+      const partners = await prisma.pathologyPartner.findMany({ where: { approvalStatus: 'APPROVED' } });
+      
+      locations = [
+        ...branches.map(b => ({ id: b.id, name: b.name, city: b.city, type: 'BRANCH' })),
+        ...partners.map(p => ({ id: p.id, name: p.labName, city: p.city || 'Partner Lab', type: 'PARTNER' }))
+      ];
+    } else {
+      // Admin sees only their assigned branch or partner lab
+      if (userBranchId) {
+        const branch = await prisma.branch.findUnique({ where: { id: userBranchId } });
+        if (branch) {
+          locations.push({ id: branch.id, name: branch.name, city: branch.city, type: 'BRANCH' });
+        }
+      } else if (userPartnerId) {
+        const partner = await prisma.pathologyPartner.findUnique({ where: { id: userPartnerId } });
+        if (partner) {
+          locations.push({ id: partner.id, name: partner.labName, city: partner.city || 'Partner Lab', type: 'PARTNER' });
+        }
+      }
+    }
+
+    res.json({ success: true, data: locations });
+  } catch (err: any) {
+    console.error('Error fetching admin locations:', err);
+    res.status(500).json({ success: false, message: 'Failed to fetch locations', error: err.message });
   }
 };

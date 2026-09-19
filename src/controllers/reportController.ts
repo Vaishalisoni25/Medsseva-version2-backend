@@ -36,6 +36,7 @@ export const getBookingsForReport = async (req: AuthRequest, res: Response) => {
         report: true,
         assignedPartner: { include: { user: { select: { name: true, mobile: true } } } },
         branch: true,
+        referringDoctor: true,
         sampleDelivery: {
           include: {
             branch: true,
@@ -92,6 +93,7 @@ export const getAllReports = async (req: AuthRequest, res: Response) => {
             packages: { include: { package: true } },
             branch: true,
             assignedPartner: { include: { user: { select: { name: true } } } },
+            referringDoctor: true,
           },
         },
         auditLogs: { orderBy: { createdAt: 'asc' } },
@@ -142,6 +144,7 @@ export const getReportById = async (req: AuthRequest, res: Response) => {
             },
             branch: true,
             assignedPartner: { include: { user: { select: { name: true } } } },
+            referringDoctor: true,
           },
         },
         auditLogs: { orderBy: { createdAt: 'asc' } },

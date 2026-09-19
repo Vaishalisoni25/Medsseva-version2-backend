@@ -15,8 +15,12 @@ export const getStaff = async (req: AuthRequest, res: Response) => {
       userType: { in: ['STAFF', 'EMPLOYEE'] },
     };
 
+    const userPartnerId = req.user?.partnerId;
+
     if (!isSuperAdmin && userBranchId) {
       where.branchId = userBranchId;
+    } else if (!isSuperAdmin && userPartnerId) {
+      where.partnerId = userPartnerId;
     } else if (branchId) {
       where.branchId = String(branchId);
     }
@@ -72,6 +76,20 @@ export const getStaff = async (req: AuthRequest, res: Response) => {
       orderBy: { createdAt: 'desc' },
     });
 
+    const partnerIds = staffList.map((s: any) => s.partnerId).filter(Boolean);
+    if (partnerIds.length > 0) {
+      const partners = await prisma.pathologyPartner.findMany({
+        where: { id: { in: partnerIds } },
+        select: { id: true, labName: true, city: true }
+      });
+      const partnerMap = new Map(partners.map(p => [p.id, p]));
+      staffList.forEach((s: any) => {
+        if (s.partnerId) {
+          s.pathologyPartner = partnerMap.get(s.partnerId);
+        }
+      });
+    }
+
     res.json(staffList);
   } catch (error: any) {
     console.error('Error fetching staff:', error);
@@ -124,6 +142,7 @@ export const createStaff = async (req: AuthRequest, res: Response) => {
       department,
       designation,
       branchId,
+      partnerId,
       franchiseId,
       userType = 'EMPLOYEE',
       signatureUrl,
@@ -144,6 +163,7 @@ export const createStaff = async (req: AuthRequest, res: Response) => {
     // Auto-resolve branch
     const isSuperAdmin = req.user?.isSuperAdmin || (req.user?.role || '').toUpperCase() === 'SUPER_ADMIN';
     const targetBranchId = branchId || (!isSuperAdmin ? req.user?.branchId : null) || null;
+    const targetPartnerId = partnerId || (!isSuperAdmin ? req.user?.partnerId : null) || null;
 
     const isPhlebo =
       (designation && /phlebotomist|collector|phlebo/i.test(designation)) ||
@@ -208,6 +228,7 @@ export const createStaff = async (req: AuthRequest, res: Response) => {
         department: department || (isPhlebo ? 'Sample Collection (Phlebotomy)' : 'Pathology Lab'),
         designation: designation || (isPhlebo ? 'Phlebotomist / Sample Collector' : 'Lab Technician'),
         branchId: targetBranchId,
+        partnerId: targetPartnerId,
         userType: isPhlebo ? 'STAFF' : (userType || 'EMPLOYEE'),
         signatureUrl: signatureUrl || null,
         isActive: true,
@@ -286,6 +307,7 @@ export const updateStaff = async (req: AuthRequest, res: Response) => {
       department,
       designation,
       branchId,
+      partnerId,
       franchiseId,
       isActive,
       signatureUrl,
@@ -319,6 +341,7 @@ export const updateStaff = async (req: AuthRequest, res: Response) => {
     if (department !== undefined) staffData.department = department;
     if (designation !== undefined) staffData.designation = designation;
     if (branchId !== undefined) staffData.branchId = branchId || null;
+    if (partnerId !== undefined) staffData.partnerId = partnerId || null;
     if (franchiseId !== undefined) staffData.franchiseId = franchiseId || null;
     if (roleId !== undefined) staffData.roleId = roleId;
     if (isActive !== undefined) staffData.isActive = isActive;
