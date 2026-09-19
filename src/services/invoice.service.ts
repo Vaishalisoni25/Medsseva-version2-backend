@@ -1,5 +1,6 @@
 import PDFDocument from 'pdfkit';
 import { cloudinary } from '../config/cloudinary';
+import { uploadToImageKit } from '../config/imagekit';
 import os from 'os';
 import path from 'path';
 import fs from 'fs';
@@ -137,16 +138,32 @@ export class InvoiceService {
     const docNumber = type === 'invoice' ? data.invoiceNumber : data.receiptNumber;
     const folder = `medseva/${type}s/${year}/${month}`;
 
-    const result = await cloudinary.uploader.upload(tmpFile, {
-      folder,
-      public_id: docNumber.replace(/[^a-zA-Z0-9\-_]/g, '-'),
-      resource_type: 'raw',
-      format: 'pdf',
-      overwrite: true,
-    });
+    let resultUrl = '';
+    let resultPublicId = '';
+
+    if (process.env.IMAGEKIT_PRIVATE_KEY) {
+      const pdfBuffer = fs.readFileSync(tmpFile);
+      const ikResult = await uploadToImageKit(
+        pdfBuffer,
+        `${docNumber.replace(/[^a-zA-Z0-9\-_]/g, '-')}.pdf`,
+        folder
+      );
+      resultUrl = ikResult.secure_url;
+      resultPublicId = ikResult.public_id;
+    } else {
+      const result = await cloudinary.uploader.upload(tmpFile, {
+        folder,
+        public_id: docNumber.replace(/[^a-zA-Z0-9\-_]/g, '-'),
+        resource_type: 'raw',
+        format: 'pdf',
+        overwrite: true,
+      });
+      resultUrl = result.secure_url;
+      resultPublicId = result.public_id;
+    }
 
     fs.unlink(tmpFile, () => {});
-    return { url: result.secure_url, publicId: result.public_id };
+    return { url: resultUrl, publicId: resultPublicId };
   }
 
   renderPdfDocument(doc: PDFKit.PDFDocument, data: InvoiceData, type: 'invoice' | 'receipt', qrBuffer: Buffer): void {

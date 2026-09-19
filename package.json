@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@google/genai": "^2.12.0",
+    "@imagekit/nodejs": "^7.12.1",
     "@prisma/adapter-pg": "^5.22.0",
     "@prisma/client": "^5.22.0",
     "@types/bcryptjs": "^2.4.6",

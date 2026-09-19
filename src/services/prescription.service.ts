@@ -1,6 +1,8 @@
 import { PrescriptionStatus } from '@prisma/client';
-import { cloudinary } from '../config/cloudinary';
 import { prisma } from '../lib/prisma';
+import { cloudinary } from '../config/cloudinary';
+import { deleteFromImageKit } from '../config/imagekit';
+
 export const prescriptionService = {
   async create(data: {
     userId: string;
@@ -85,7 +87,13 @@ export const prescriptionService = {
   async deleteById(id: string) {
     const prescription = await prisma.prescription.findUnique({ where: { id } });
     if (!prescription) throw new Error('NOT_FOUND');
-    await cloudinary.uploader.destroy(prescription.publicId, { resource_type: 'raw' });
+    if (prescription.publicId) {
+      if (process.env.IMAGEKIT_PRIVATE_KEY) {
+        await deleteFromImageKit(prescription.publicId).catch(() => {});
+      } else {
+        await cloudinary.uploader.destroy(prescription.publicId, { resource_type: 'raw' }).catch(() => {});
+      }
+    }
     return prisma.prescription.delete({ where: { id } });
   },
 };

@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { AuthRequest } from '../middlewares/authMiddleware';
 import cloudinary from '../config/cloudinary';
+import { uploadFileToStorage, deleteFromImageKit } from '../middlewares/upload';
 
 
 
@@ -103,7 +104,11 @@ export const deleteBanner = async (req: AuthRequest, res: Response) => {
     const banner = await prisma.cmsBanner.findUnique({ where: { id } });
     if (!banner) return res.status(404).json({ error: 'Banner not found' });
     if (banner.imagePublicId) {
-      await cloudinary.uploader.destroy(banner.imagePublicId).catch(() => {});
+      if (process.env.IMAGEKIT_PRIVATE_KEY) {
+        await deleteFromImageKit(banner.imagePublicId).catch(() => {});
+      } else {
+        await cloudinary.uploader.destroy(banner.imagePublicId).catch(() => {});
+      }
     }
     await prisma.cmsBanner.delete({ where: { id } });
     await logCmsAction(req.user?.id, req.user?.role, 'BANNER_DELETED', 'CmsBanner', id, { title: banner.title });
@@ -116,9 +121,8 @@ export const deleteBanner = async (req: AuthRequest, res: Response) => {
 export const uploadBannerImage = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No image provided' });
-    const b64 = Buffer.from(req.file.buffer).toString('base64');
-    const dataURI = `data:${req.file.mimetype};base64,${b64}`;
-    const result = await cloudinary.uploader.upload(dataURI, { folder: 'cms/banners' });
+    const fileName = req.file.originalname || `banner_${Date.now()}.jpg`;
+    const result = await uploadFileToStorage(req.file.buffer, fileName, req.file.mimetype, 'cms/banners');
     res.json({ imageUrl: result.secure_url, publicId: result.public_id });
   } catch {
     res.status(500).json({ error: 'Image upload failed' });

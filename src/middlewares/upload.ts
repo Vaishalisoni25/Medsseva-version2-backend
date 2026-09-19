@@ -72,7 +72,20 @@ export const documentUpload = multer({
   fileFilter: documentFileFilter,
 }).single('file');
 
-export const uploadToCloudinary = (buffer: Buffer, originalName: string, mimeType: string, folder = 'medseva/prescriptions'): Promise<{ secure_url: string; public_id: string }> => {
+import { uploadToImageKit, deleteFromImageKit, imagekit } from '../config/imagekit';
+
+export const uploadFileToStorage = async (
+  buffer: Buffer,
+  originalName: string,
+  mimeType: string,
+  folder = 'medseva/prescriptions'
+): Promise<{ secure_url: string; public_id: string }> => {
+  // If ImageKit credentials are configured, use ImageKit
+  if (process.env.IMAGEKIT_PRIVATE_KEY) {
+    return uploadToImageKit(buffer, originalName, folder);
+  }
+
+  // Fallback to Cloudinary if ImageKit is not set
   return new Promise((resolve, reject) => {
     const ext = originalName.split('.').pop()?.toLowerCase() || 'bin';
     const isImage = ['jpg', 'jpeg', 'png', 'webp'].includes(ext);
@@ -98,4 +111,6 @@ export const uploadToCloudinary = (buffer: Buffer, originalName: string, mimeTyp
   });
 };
 
-export { cloudinary };
+// Keep backwards-compatible alias so existing controller imports continue working
+export const uploadToCloudinary = uploadFileToStorage;
+export { uploadToImageKit, deleteFromImageKit, imagekit, cloudinary };

@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/prisma';
 import { AuthRequest } from '../middlewares/authMiddleware';
 import { cloudinary } from '../config/cloudinary';
+import { uploadFileToStorage } from '../middlewares/upload';
 
 export const getDoctors = async (req: AuthRequest, res: Response) => {
   try {
@@ -390,15 +391,11 @@ export const uploadDoctorSignature = async (req: AuthRequest, res: Response) => 
       return res.status(400).json({ error: 'No signature image file provided' });
     }
 
-    const b64 = Buffer.from(file.buffer).toString('base64');
-    const dataURI = `data:${file.mimetype};base64,${b64}`;
-    const result = await cloudinary.uploader.upload(dataURI, {
-      folder: 'medseva/signatures',
-      resource_type: 'image',
-    });
+    const { doctorId } = req.body;
+    const fileName = file.originalname || `signature_${doctorId || Date.now()}.png`;
+    const result = await uploadFileToStorage(file.buffer, fileName, file.mimetype, 'medseva/signatures');
 
     const signatureUrl = result.secure_url;
-    const { doctorId } = req.body;
     if (doctorId) {
       await (prisma as any).doctor.update({
         where: { id: doctorId },

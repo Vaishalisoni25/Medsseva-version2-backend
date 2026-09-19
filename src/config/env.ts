@@ -4,9 +4,6 @@ const REQUIRED_ENV_VARS = [
   'RAZORPAY_KEY_ID',
   'RAZORPAY_KEY_SECRET',
   'RAZORPAY_WEBHOOK_SECRET',
-  'CLOUDINARY_CLOUD_NAME',
-  'CLOUDINARY_API_KEY',
-  'CLOUDINARY_API_SECRET',
 ] as const;
 
 export function validateEnv(): void {
@@ -16,6 +13,13 @@ export function validateEnv(): void {
     if (!process.env[key] || process.env[key]!.trim() === '') {
       missing.push(key);
     }
+  }
+
+  const hasImageKit = Boolean(process.env.IMAGEKIT_PRIVATE_KEY && process.env.IMAGEKIT_PUBLIC_KEY);
+  const hasCloudinary = Boolean(process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET);
+
+  if (!hasImageKit && !hasCloudinary) {
+    missing.push('IMAGEKIT_PRIVATE_KEY & IMAGEKIT_PUBLIC_KEY (or CLOUDINARY credentials)');
   }
 
   if (missing.length > 0) {
