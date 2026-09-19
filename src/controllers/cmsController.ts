@@ -21,6 +21,14 @@ const logCmsAction = async (
 
 export const getBanners = async (req: AuthRequest, res: Response) => {
   try {
+    const banners = await prisma.cmsBanner.findMany({ orderBy: { displayOrder: 'asc' } });
+    const mappedBanners = banners.map(b => {
+      if (b.title.startsWith('[PROMO]')) {
+        return { ...b, title: b.title.replace('[PROMO]', '').trim(), bannerType: 'PROMO' };
+      }
+      return { ...b, bannerType: 'HERO' };
+    });
+    res.json({ banners: mappedBanners });
     const { type } = req.query;
     const where: any = {};
     if (type && typeof type === 'string') {
@@ -38,6 +46,7 @@ export const getBanners = async (req: AuthRequest, res: Response) => {
 
 export const createBanner = async (req: AuthRequest, res: Response) => {
   try {
+    const { title, subtitle, description, imageUrl, imagePublicId, linkType, linkValue, priority, displayOrder, startDate, endDate, cities, branches, bannerType } = req.body;
     const {
       title,
       subtitle,
@@ -55,8 +64,11 @@ export const createBanner = async (req: AuthRequest, res: Response) => {
       branches,
     } = req.body;
     if (!title || !imageUrl) return res.status(400).json({ error: 'title and imageUrl are required' });
+    const finalTitle = bannerType === 'PROMO' ? `[PROMO] ${title}` : title;
     const banner = await prisma.cmsBanner.create({
       data: {
+        title: finalTitle, subtitle, description, imageUrl, imagePublicId,
+        linkType: linkType || 'Package', linkValue,
         title,
         subtitle,
         description,
@@ -78,6 +90,9 @@ export const createBanner = async (req: AuthRequest, res: Response) => {
     await logCmsAction(req.user?.id, req.user?.role, 'BANNER_CREATED', 'CmsBanner', banner.id, { title, bannerType: banner.bannerType });
     res.status(201).json({ banner });
   } catch (error: any) {
+    console.error('BANNER CREATE ERROR:', error);
+    res.status(500).json({ error: 'Failed to create banner', details: error.message });
+  } catch (error: any) {
     console.error('CREATE BANNER ERROR:', error);
     res.status(500).json({ error: 'Failed to create banner', details: error?.message });
   }
@@ -87,6 +102,14 @@ export const updateBanner = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
     const data = req.body;
+    if (data.bannerType !== undefined) {
+      if (data.bannerType === 'PROMO') {
+        if (data.title && !data.title.startsWith('[PROMO]')) data.title = `[PROMO] ${data.title}`;
+      } else {
+        if (data.title && data.title.startsWith('[PROMO]')) data.title = data.title.replace('[PROMO]', '').trim();
+      }
+      delete data.bannerType;
+    }
     if (data.bannerType) data.bannerType = String(data.bannerType).toUpperCase();
     if (data.startDate) data.startDate = new Date(data.startDate);
     if (data.endDate) data.endDate = new Date(data.endDate);
@@ -105,9 +128,9 @@ export const deleteBanner = async (req: AuthRequest, res: Response) => {
     if (!banner) return res.status(404).json({ error: 'Banner not found' });
     if (banner.imagePublicId) {
       if (process.env.IMAGEKIT_PRIVATE_KEY) {
-        await deleteFromImageKit(banner.imagePublicId).catch(() => {});
+        await deleteFromImageKit(banner.imagePublicId).catch(() => { });
       } else {
-        await cloudinary.uploader.destroy(banner.imagePublicId).catch(() => {});
+        await cloudinary.uploader.destroy(banner.imagePublicId).catch(() => { });
       }
     }
     await prisma.cmsBanner.delete({ where: { id } });

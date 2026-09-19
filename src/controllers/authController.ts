@@ -1391,7 +1391,7 @@ export const verifyOtp = async (req: Request, res: Response) => {
     if (!mobile || !otp) return res.status(400).json({ error: 'Mobile and OTP are required' });
     const isDevTestOtp = process.env.NODE_ENV !== 'production' || process.env.DEV_TEST_OTP_ENABLED === 'true';
     const validOtps = isDevTestOtp ? ['1234', '123456', process.env.DEV_TEST_OTP || '123456'] : ['1234', process.env.DEV_TEST_OTP || '123456'];
-    if (!validOtps.includes(otp)) return res.status(400).json({ error: 'Invalid OTP' });
+    if (!validOtps.includes(String(otp))) return res.status(400).json({ error: 'Invalid OTP' });
     return res.json({ success: true, message: 'OTP verified' });
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to verify OTP', details: error.message });
@@ -1404,7 +1404,7 @@ export const loginWithOtp = async (req: Request, res: Response) => {
     if (!mobile || !otp) return res.status(400).json({ error: 'Mobile and OTP are required' });
     const isDevTestOtp = process.env.NODE_ENV !== 'production' || process.env.DEV_TEST_OTP_ENABLED === 'true';
     const validOtps = isDevTestOtp ? ['1234', '123456', process.env.DEV_TEST_OTP || '123456'] : ['1234', process.env.DEV_TEST_OTP || '123456'];
-    if (!validOtps.includes(otp)) return res.status(400).json({ error: 'Invalid OTP' });
+    if (!validOtps.includes(String(otp))) return res.status(400).json({ error: 'Invalid OTP' });
 
     const user = await prisma.user.findUnique({ where: { mobile } });
     if (!user) return res.status(404).json({ error: 'This mobile number is not registered. Please register first.' });
