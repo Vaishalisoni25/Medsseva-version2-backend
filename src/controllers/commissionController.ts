@@ -422,7 +422,7 @@ export const getAdminCommissions = async (req: AuthRequest, res: Response) => {
 
     const [doctors, partners, executives, recentCommissions] = await Promise.all([
       (prisma as any).doctor.findMany({
-        where: { isActive: true, doctorType: 'DIRECT' },
+        where: { isActive: true },
         include: { branch: true },
         orderBy: { name: 'asc' },
       }),
@@ -610,8 +610,13 @@ export const getAdminCommissions = async (req: AuthRequest, res: Response) => {
       })
     );
 
-    phlebotomistSummaries.sort((a, b) => a.name.localeCompare(b.name));
-    partnerSummaries.sort((a, b) => a.name.localeCompare(b.name));
+    const finalPartners = partnerSummaries.filter(p => p.qualification !== 'PHLEBOTOMIST');
+    const finalPhlebotomists = (phlebotomistSummaries && phlebotomistSummaries.length > 0)
+      ? phlebotomistSummaries
+      : partnerSummaries.filter(p => p.qualification === 'PHLEBOTOMIST');
+
+    finalPartners.sort((a, b) => a.name.localeCompare(b.name));
+    finalPhlebotomists.sort((a, b) => a.name.localeCompare(b.name));
 
     res.json({
       period,
@@ -621,8 +626,8 @@ export const getAdminCommissions = async (req: AuthRequest, res: Response) => {
       userBranchId: userBranchId || null,
       branches,
       doctors: doctorSummaries,
-      phlebotomists: phlebotomistSummaries,
-      partners: partnerSummaries,
+      partners: finalPartners,
+      phlebotomists: finalPhlebotomists,
       recentCommissions,
     });
   } catch (error: any) {

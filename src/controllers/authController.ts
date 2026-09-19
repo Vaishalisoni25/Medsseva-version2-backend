@@ -1754,6 +1754,55 @@ export const getAllUsers = async (req: any, res: Response) => {
       isActive: activeMap.has(u.id) ? activeMap.get(u.id) : true,
     }));
 
+    // Fetch patients from bookings made by doctors
+    const doctorBookings = await prisma.booking.findMany({
+      where: {
+        referringDoctorId: { not: null },
+        status: { notIn: ['CANCELLED'] }
+      },
+      distinct: ['patientMobile'],
+      orderBy: { createdAt: 'desc' },
+      include: {
+        tests: { include: { test: true } }
+      }
+    });
+
+    const existingMobiles = new Set(enriched.map((u: any) => u.mobile).filter(Boolean));
+    const freelancePatients = doctorBookings
+      .filter((b: any) => b.patientMobile && !existingMobiles.has(b.patientMobile))
+      .map((b: any) => ({
+        id: `pat-booking-${b.id}`,
+        name: b.patientName,
+        mobile: b.patientMobile,
+        email: null,
+        role: 'USER',
+        isActive: true,
+        uhid: `UHID-F-${b.id.slice(0,5).toUpperCase()}`,
+        dob: b.patientAge ? new Date(new Date().getFullYear() - b.patientAge, 0, 1) : null,
+        gender: b.patientGender,
+        bloodGroup: null,
+        branchId: b.branchId,
+        createdAt: b.createdAt,
+        bookings: [
+          {
+            id: b.id,
+            bookingCode: b.bookingCode,
+            branchId: b.branchId,
+            status: b.status,
+            createdAt: b.createdAt,
+            scheduledDate: b.scheduledDate,
+            totalPaid: b.totalPaid,
+          }
+        ],
+        familyMembers: [],
+        addresses: [],
+        isFreelancerPatient: true,
+      }));
+
+    if (role === 'USER' || !role) {
+      enriched.push(...freelancePatients as any);
+    }
+
     res.json(enriched);
   } catch (error: any) {
     console.error('Error fetching registered users:', error);
