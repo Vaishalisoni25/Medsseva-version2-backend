@@ -6,7 +6,7 @@ import { AuthRequest } from '../middlewares/authMiddleware';
 // GET /api/staff
 export const getStaff = async (req: AuthRequest, res: Response) => {
   try {
-    const { branchId, department, designation, search } = req.query;
+    const { branchId, partnerId, department, designation, search } = req.query;
 
     const isSuperAdmin = req.user?.isSuperAdmin || (req.user?.role || '').toUpperCase() === 'SUPER_ADMIN';
     const userBranchId = req.user?.branchId;
@@ -21,6 +21,8 @@ export const getStaff = async (req: AuthRequest, res: Response) => {
       where.branchId = userBranchId;
     } else if (!isSuperAdmin && userPartnerId) {
       where.partnerId = userPartnerId;
+    } else if (partnerId) {
+      where.partnerId = String(partnerId);
     } else if (branchId) {
       where.branchId = String(branchId);
     }

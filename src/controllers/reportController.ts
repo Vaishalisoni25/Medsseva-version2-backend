@@ -217,7 +217,11 @@ export const createReport = async (req: AuthRequest, res: Response) => {
         hasAbnormalFlags: hasAbnormal,
         recipientType: recipientType || 'USER',
         recipientId: recipientId || null,
-        reportBranchId: reportBranchId || null,
+        reportBranchId: await (async () => {
+          if (!reportBranchId) return null;
+          const branch = await prisma.branch.findUnique({ where: { id: reportBranchId } });
+          return branch ? reportBranchId : null;
+        })(),
         doctorName: doctorName || null,
         doctorQualification: doctorQualification || null,
         doctorRegNo: doctorRegNo || null,
@@ -262,7 +266,7 @@ export const updateReportDraft = async (req: AuthRequest, res: Response) => {
 
     const report = await prisma.report.findUnique({ where: { id } });
     if (!report) return res.status(404).json({ error: 'Report not found' });
-    if (report.status === 'APPROVED' || report.status === 'RELEASED') {
+    if (report.status === 'VERIFIED' || report.status === 'PUBLISHED') {
       return res.status(400).json({ error: 'Cannot edit a finalized report' });
     }
 
@@ -278,7 +282,11 @@ export const updateReportDraft = async (req: AuthRequest, res: Response) => {
         doctorRemarks: doctorRemarks || null,
         internalNotes: internalNotes || null,
         hasAbnormalFlags: hasAbnormal,
-        reportBranchId: reportBranchId || null,
+        reportBranchId: await (async () => {
+          if (!reportBranchId) return null;
+          const branch = await prisma.branch.findUnique({ where: { id: reportBranchId } });
+          return branch ? reportBranchId : null;
+        })(),
         doctorName: doctorName || null,
         doctorQualification: doctorQualification || null,
         doctorRegNo: doctorRegNo || null,
@@ -343,14 +351,14 @@ export const finalizeReport = async (req: AuthRequest, res: Response) => {
     if (report.parameters.length === 0) {
       return res.status(400).json({ error: 'Cannot finalize a report with no parameters entered' });
     }
-    if (report.status === 'APPROVED' || report.status === 'RELEASED') {
+    if (report.status === 'VERIFIED' || report.status === 'PUBLISHED') {
       return res.status(400).json({ error: 'Report is already finalized' });
     }
 
 const finalized = await prisma.report.update({
       where: { id },
       data: {
-        status: 'APPROVED',
+        status: 'VERIFIED',
         verifiedById: req.user.id,
         verifiedAt: new Date(),
         auditLogs: {
@@ -439,7 +447,7 @@ export const sendReport = async (req: AuthRequest, res: Response) => {
     const released = await prisma.report.update({
       where: { id },
       data: {
-        status: 'RELEASED',
+        status: 'PUBLISHED',
         recipientType,
         recipientId,
         auditLogs: {
@@ -601,7 +609,7 @@ export const verifyReport = async (req: AuthRequest, res: Response) => {
     const report = await prisma.report.update({
       where: { id },
       data: {
-        status: 'UNDER_REVIEW',
+        status: 'PENDING_VERIFICATION',
         verifiedById: req.user.id,
         verifiedAt: new Date(),
         auditLogs: {

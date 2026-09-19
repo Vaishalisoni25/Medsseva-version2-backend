@@ -1,4 +1,5 @@
 import { branchRepository } from '../repositories/branch.repository';
+import { prisma } from '../lib/prisma';
 
 export const branchService = {
   getAllBranches: async (query: {
@@ -14,6 +15,36 @@ export const branchService = {
     if (query.labVisit === 'true') filters.labVisit = true;
     
     let branches = await branchRepository.findAll(filters);
+
+    const partners = await prisma.pathologyPartner.findMany({
+      where: { approvalStatus: 'APPROVED', role: { not: 'PHLEBOTOMIST' } },
+      include: { user: true }
+    });
+
+    const partnerBranches = partners.map(p => ({
+      id: p.id,
+      name: p.labName || 'Partner Lab',
+      code: p.partnerCode || `P-${p.id.substring(0,6).toUpperCase()}`,
+      line1: p.address || p.city || '',
+      city: p.city || '',
+      state: p.state || '',
+      pincode: p.pincode || '',
+      latitude: p.latitude || null,
+      longitude: p.longitude || null,
+      contactNumber: p.user?.mobile || '',
+      email: p.user?.email || '',
+      labRegNo: '',
+      workingHours: '9:00 AM - 6:00 PM',
+      availableSlots: [],
+      homeCollection: false,
+      labVisit: true,
+      isActive: true,
+      createdAt: p.createdAt,
+      updatedAt: p.updatedAt,
+      isPartnerLab: true
+    }));
+
+    branches = [...branches, ...partnerBranches];
 
     if (query.lat && query.lng) {
       const lat1 = parseFloat(query.lat);

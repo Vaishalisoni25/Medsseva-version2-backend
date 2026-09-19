@@ -102,6 +102,9 @@ export const createDoctor = async (req: AuthRequest, res: Response) => {
   try {
     const {
       name,
+      email,
+      mobile,
+      password,
       qualification,
       registrationNo,
       specialization = 'Pathology',
@@ -112,6 +115,7 @@ export const createDoctor = async (req: AuthRequest, res: Response) => {
       cityId,
       partnerId,
       userId,
+      roleId,
       approvalStatus = 'PENDING',
       isActive = false,
     } = req.body;
@@ -120,21 +124,90 @@ export const createDoctor = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ error: 'Name, Qualification, and Registration Number are required' });
     }
 
-    const targetBranchId = branchId || (!req.user?.isSuperAdmin ? req.user?.branchId : null) || null;
+    let finalBranchId = null;
+    let finalPartnerId = partnerId || null;
+
+    if (branchId) {
+      const isBranch = await prisma.branch.findUnique({ where: { id: branchId } });
+      if (isBranch) {
+        finalBranchId = branchId;
+      } else {
+        const isPartner = await prisma.pathologyPartner.findUnique({ where: { id: branchId } });
+        if (isPartner) {
+          finalPartnerId = branchId;
+        } else {
+          finalBranchId = branchId;
+        }
+      }
+    } else {
+      finalBranchId = (!req.user?.isSuperAdmin ? req.user?.branchId : null) || null;
+      if (!finalBranchId && !req.user?.isSuperAdmin) {
+        finalPartnerId = req.user?.partnerId || null;
+      }
+    }
+
+    let finalUserId = userId;
+    
+    // Create User if email and password are provided (Admin flow)
+    if (!finalUserId && email && password) {
+      const cleanEmail = email.trim().toLowerCase();
+      const existing = await prisma.user.findUnique({ where: { email: cleanEmail } });
+      if (existing) {
+        return res.status(400).json({ error: 'Email is already registered' });
+      }
+
+      const cleanMobile = mobile ? mobile.trim() : undefined;
+      if (cleanMobile) {
+        const existingMobile = await prisma.user.findUnique({ where: { mobile: cleanMobile } });
+        if (existingMobile) {
+          return res.status(400).json({ error: 'Mobile number is already registered' });
+        }
+      }
+
+      const hashedPassword = await bcrypt.hash(password, 10);
+      const user = await prisma.user.create({
+        data: {
+          name: name.trim(),
+          email: cleanEmail,
+          mobile: cleanMobile || `doc_${Date.now()}`,
+          password: hashedPassword,
+          role: 'DOCTOR',
+        },
+      });
+      finalUserId = user.id;
+
+      if (roleId) {
+        await (prisma as any).adminUser.create({
+          data: {
+            userId: user.id,
+            roleId,
+            department: 'Pathology',
+            designation,
+            branchId: finalBranchId,
+            partnerId: finalPartnerId,
+            userType: 'DOCTOR',
+            isActive: true,
+          }
+        });
+      }
+    }
+
+    const doctorCode = `DOC-${Date.now().toString().slice(-6)}`;
 
     const doctor = await (prisma as any).doctor.create({
       data: {
         name,
+        code: doctorCode,
         qualification,
         registrationNo,
         specialization,
         designation,
         photoUrl: photoUrl || null,
         signatureUrl: signatureUrl || null,
-        branchId: targetBranchId,
+        branchId: finalBranchId,
         cityId: cityId || null,
-        partnerId: partnerId || null,
-        userId: userId || null,
+        partnerId: finalPartnerId,
+        userId: finalUserId || null,
         approvalStatus,
         isActive,
         doctorType: (req.body as any).doctorType || 'EMPLOYEE',
@@ -179,9 +252,31 @@ export const updateDoctor = async (req: AuthRequest, res: Response) => {
     if (designation !== undefined) data.designation = designation;
     if (photoUrl !== undefined) data.photoUrl = photoUrl;
     if (signatureUrl !== undefined) data.signatureUrl = signatureUrl;
-    if (branchId !== undefined) data.branchId = branchId;
+    
+    if (branchId !== undefined) {
+      if (!branchId) {
+        data.branchId = null;
+        data.partnerId = null;
+      } else {
+        const isBranch = await prisma.branch.findUnique({ where: { id: branchId } });
+        if (isBranch) {
+          data.branchId = branchId;
+          data.partnerId = null;
+        } else {
+          const isPartner = await prisma.pathologyPartner.findUnique({ where: { id: branchId } });
+          if (isPartner) {
+            data.partnerId = branchId;
+            data.branchId = null;
+          } else {
+            data.branchId = branchId;
+          }
+        }
+      }
+    } else if (partnerId !== undefined) {
+      data.partnerId = partnerId;
+    }
+    
     if (cityId !== undefined) data.cityId = cityId;
-    if (partnerId !== undefined) data.partnerId = partnerId;
     if (isActive !== undefined) data.isActive = isActive;
     if (approvalStatus !== undefined) data.approvalStatus = approvalStatus;
     if (rejectionReason !== undefined) data.rejectionReason = rejectionReason;
