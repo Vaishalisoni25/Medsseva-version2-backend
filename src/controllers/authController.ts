@@ -1517,7 +1517,6 @@ export const loginWithOtp = async (req: Request, res: Response) => {
   try {
     const { mobile, otp } = req.body;
     if (!mobile || !otp) return res.status(400).json({ error: 'Mobile and OTP are required' });
-
     const cleanMobile = String(mobile).replace(/\D/g, '').slice(-10);
     const enteredOtp = String(otp).trim();
 
