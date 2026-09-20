@@ -34,6 +34,7 @@ model User {
   referrals           User[]          @relation("UserReferrals")
   isFirstTestFreeEligible Boolean     @default(false)
   firstTestFreeUsed   Boolean         @default(false)
+  walletBalance       Float           @default(0)
   isActive            Boolean         @default(true)
   createdAt           DateTime        @default(now())
   addresses           Address[]
@@ -52,10 +53,26 @@ model User {
   conversations       Conversation[]
   deviceTokens        DeviceToken[]
   notifications       Notification[]
-bookingIntents      BookingIntent[]
+  bookingIntents      BookingIntent[]
   partnerRatings      PartnerRating[]
   expenses            Expense[]       @relation("UserExpenses")
+  walletTransactions  WalletTransaction[]
 }
+
+model WalletTransaction {
+  id          String   @id @default(uuid())
+  userId      String
+  amount      Float
+  type        String   // 'CREDIT' | 'DEBIT'
+  description String
+  bookingId   String?
+  createdAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([createdAt])
+}
+
 model City {
   id        String   @id @default(uuid())
   name      String   @unique
@@ -1366,6 +1383,7 @@ model SystemSettings {
   maintenanceMode             Boolean  @default(false)
   allowBookings               Boolean  @default(true)
   allowPartnerRegistration    Boolean  @default(true)
+  referralRewardAmount        Float    @default(100)
   updatedBy                   String?
   updatedAt                   DateTime @updatedAt
   createdAt                   DateTime @default(now())

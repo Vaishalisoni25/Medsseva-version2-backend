@@ -906,6 +906,7 @@ export const getMyReports = async (req: AuthRequest, res: Response) => {
             tests: { include: { test: true } },
             packages: { include: { package: true } },
             branch: true,
+            payment: true,
           },
         },
       },

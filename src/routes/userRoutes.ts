@@ -14,5 +14,8 @@ router.delete('/me', deleteMe);
 router.post('/me/avatar', avatarUpload, uploadAvatar);
 router.post('/family', addFamilyMember);
 router.delete('/family/:id', removeFamilyMember);
+import { getWallet } from '../controllers/walletController';
+
+router.get('/wallet', getWallet);
 
 export default router;

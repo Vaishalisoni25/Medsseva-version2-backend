@@ -223,6 +223,7 @@ export const createBooking = async (req: any, res: Response) => {
       collectionMode,
       paymentMethod,
       couponCode,
+      useWallet,
     } = req.body;
 
 const user = await prisma.user.findUnique({ where: { id: req.user.id } });
@@ -298,6 +299,13 @@ const user = await prisma.user.findUnique({ where: { id: req.user.id } });
     }
 
     const resolvedPaymentMode = mapPaymentMethodToMode(paymentMethod);
+    let walletDiscount = 0;
+    let finalPayable = pricing.finalAmount;
+
+    if (useWallet && user.walletBalance > 0) {
+      walletDiscount = Math.min(finalPayable, user.walletBalance);
+      finalPayable -= walletDiscount;
+    }
 
     const booking = await prisma.$transaction(async (tx) => {
       const newBooking = await tx.booking.create({
@@ -306,23 +314,39 @@ const user = await prisma.user.findUnique({ where: { id: req.user.id } });
           userId: user.id,
           scheduledDate: parsedDate,
           scheduledSlot: scheduledSlot || 'Anytime',
-          totalPaid: pricing.finalAmount,
+          totalPaid: finalPayable,
           patientName: patientName || user.name || 'Guest',
           patientAge: patientAge ? Number(patientAge) : null,
           patientGender: patientGender || null,
           patientMobile: mobile || user.mobile || null,
           status: safeCollectionMode === 'HOME' ? 'WAITING_FOR_PARTNER' : 'WAITING_FOR_ASSIGNMENT',
-          paymentStatus: 'PENDING',
+          paymentStatus: finalPayable === 0 ? 'SUCCESS' : 'PENDING',
           collectionMode: safeCollectionMode as any,
           collectionOtp: safeCollectionMode === 'HOME' ? Math.floor(1000 + Math.random() * 9000).toString() : null,
           addressId: finalAddressId,
           branchId: finalBranchId,
-          paymentMode: resolvedPaymentMode as any,
+          paymentMode: finalPayable === 0 ? 'UPI' : (resolvedPaymentMode as any),
           tests: { create: testIds.map((id: string) => ({ testId: id })) },
           packages: { create: packageIds.map((id: string) => ({ packageId: id })) },
         },
         include: { tests: true, user: true },
       });
+
+      if (walletDiscount > 0) {
+        await tx.user.update({
+          where: { id: user.id },
+          data: { walletBalance: { decrement: walletDiscount } },
+        });
+        await tx.walletTransaction.create({
+          data: {
+            userId: user.id,
+            amount: walletDiscount,
+            type: 'DEBIT',
+            description: `Used for booking ${bookingCode}`,
+            bookingId: newBooking.id,
+          }
+        });
+      }
 
       await tx.pricingSnapshot.create({
         data: {

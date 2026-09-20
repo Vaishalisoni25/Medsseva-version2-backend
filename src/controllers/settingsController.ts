@@ -46,6 +46,7 @@ export const updateSettings = async (req: Request, res: Response) => {
     maintenanceMode,
     allowBookings,
     allowPartnerRegistration,
+    referralRewardAmount,
   } = req.body;
 
   if (minimumHomeCollectionAmount !== undefined && minimumHomeCollectionAmount < 0) {
@@ -56,6 +57,9 @@ export const updateSettings = async (req: Request, res: Response) => {
   }
   if (defaultPartnerCommission !== undefined && (defaultPartnerCommission < 0 || defaultPartnerCommission > 100)) {
     return res.status(400).json({ error: 'Commission must be between 0 and 100' });
+  }
+  if (referralRewardAmount !== undefined && referralRewardAmount < 0) {
+    return res.status(400).json({ error: 'Referral reward amount cannot be negative' });
   }
   if (labOpenTime && labCloseTime && labOpenTime >= labCloseTime) {
     return res.status(400).json({ error: 'Opening time must be before closing time' });
@@ -84,6 +88,7 @@ export const updateSettings = async (req: Request, res: Response) => {
         ...(maintenanceMode !== undefined && { maintenanceMode }),
         ...(allowBookings !== undefined && { allowBookings }),
         ...(allowPartnerRegistration !== undefined && { allowPartnerRegistration }),
+        ...(referralRewardAmount !== undefined && { referralRewardAmount }),
         updatedBy: userId ?? null,
       },
     });
@@ -111,6 +116,7 @@ export const updateSettings = async (req: Request, res: Response) => {
             maintenanceMode: old.maintenanceMode,
             allowBookings: old.allowBookings,
             allowPartnerRegistration: old.allowPartnerRegistration,
+            referralRewardAmount: old.referralRewardAmount,
           },
           new: {
             minimumHomeCollectionAmount: updated.minimumHomeCollectionAmount,
@@ -122,6 +128,7 @@ export const updateSettings = async (req: Request, res: Response) => {
             maintenanceMode: updated.maintenanceMode,
             allowBookings: updated.allowBookings,
             allowPartnerRegistration: updated.allowPartnerRegistration,
+            referralRewardAmount: updated.referralRewardAmount,
           },
         },
       });

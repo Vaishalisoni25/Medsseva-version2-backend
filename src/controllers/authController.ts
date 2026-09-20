@@ -456,7 +456,6 @@ export const register = async (req: Request, res: Response) => {
         return res.status(400).json({ error: 'You cannot use your own referral code.' });
       }
       referredById = referrer.id;
-      isFirstTestFreeEligible = true;
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -478,9 +477,31 @@ export const register = async (req: Request, res: Response) => {
         otpLastSentAt: new Date(),
         referralCode: userReferralCode,
         referredById,
-        isFirstTestFreeEligible,
       }
     });
+
+    if (referredById) {
+      try {
+        const settings = await prisma.systemSettings.findUnique({ where: { id: 'singleton' } });
+        const rewardAmount = settings?.referralRewardAmount || 100;
+        
+        await prisma.user.update({
+          where: { id: referredById },
+          data: { walletBalance: { increment: rewardAmount } }
+        });
+
+        await prisma.walletTransaction.create({
+          data: {
+            userId: referredById,
+            amount: rewardAmount,
+            type: 'CREDIT',
+            description: `Referral reward for inviting ${name}`,
+          }
+        });
+      } catch (err: any) {
+        console.error('Failed to process referral reward:', err);
+      }
+    }
 
     try {
       await sendOtpEmail(email, name, otp);
