@@ -966,6 +966,7 @@ export const getPartnerHistory = async (req: any, res: Response) => {
       include: {
         tests: { include: { test: { select: { name: true } } } },
         packages: { include: { package: { select: { name: true } } } },
+        assignedExecutive: { select: { name: true } },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -1005,6 +1006,9 @@ const assignedFormatted = await Promise.all(assignedBookings.map(async (b) => {
         tests: b.tests.map(t => ({ name: t.test.name })),
         packages: b.packages.map(p => ({ name: p.package.name })),
         isRejected: false,
+        assignedExecutiveId: b.assignedExecutiveId,
+        assignedPartnerId: b.assignedPartnerId,
+        assignedExecutiveName: (b as any).assignedExecutive?.name || null,
       };
     }));
     const rejectedFormatted = await Promise.all(rejections.map(async (r) => {
