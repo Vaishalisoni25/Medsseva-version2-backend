@@ -25,7 +25,12 @@ export const getDoctors = async (req: AuthRequest, res: Response) => {
     if (!isSuperAdmin && userBranchId) {
       where.branchId = userBranchId;
     } else if (branchId) {
-      where.branchId = String(branchId);
+      const isPartner = await prisma.pathologyPartner.findUnique({ where: { id: String(branchId) } });
+      if (isPartner) {
+        where.partnerId = String(branchId);
+      } else {
+        where.branchId = String(branchId);
+      }
     }
     if (cityId) {
       where.cityId = String(cityId);

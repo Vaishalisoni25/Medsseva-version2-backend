@@ -24,7 +24,12 @@ export const getStaff = async (req: AuthRequest, res: Response) => {
     } else if (partnerId) {
       where.partnerId = String(partnerId);
     } else if (branchId) {
-      where.branchId = String(branchId);
+      const isPartner = await prisma.pathologyPartner.findUnique({ where: { id: String(branchId) } });
+      if (isPartner) {
+        where.partnerId = String(branchId);
+      } else {
+        where.branchId = String(branchId);
+      }
     }
 
     if (department && department !== 'ALL') {
@@ -162,10 +167,21 @@ export const createStaff = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ error: 'Email is already registered in the system' });
     }
 
-    // Auto-resolve branch
+    // Auto-resolve branch / partner lab
     const isSuperAdmin = req.user?.isSuperAdmin || (req.user?.role || '').toUpperCase() === 'SUPER_ADMIN';
-    const targetBranchId = branchId || (!isSuperAdmin ? req.user?.branchId : null) || null;
-    const targetPartnerId = partnerId || (!isSuperAdmin ? req.user?.partnerId : null) || null;
+    let targetBranchId = branchId || (!isSuperAdmin ? req.user?.branchId : null) || null;
+    let targetPartnerId = partnerId || (!isSuperAdmin ? req.user?.partnerId : null) || null;
+
+    if (targetBranchId && !targetPartnerId) {
+      const isBranch = await prisma.branch.findUnique({ where: { id: targetBranchId } });
+      if (!isBranch) {
+        const isPartner = await prisma.pathologyPartner.findUnique({ where: { id: targetBranchId } });
+        if (isPartner) {
+          targetPartnerId = targetBranchId;
+          targetBranchId = null;
+        }
+      }
+    }
 
     const isPhlebo =
       (designation && /phlebotomist|collector|phlebo/i.test(designation)) ||

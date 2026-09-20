@@ -49,7 +49,14 @@ export const getBookingsForReport = async (req: AuthRequest, res: Response) => {
     const withAddress = await Promise.all(
       bookings.map(async (b) => {
         const address = await prisma.address.findUnique({ where: { id: b.addressId } });
-        return { ...b, address };
+        const repBranch = b.report ? resolveReportBranch(b.report) : null;
+        const report = b.report ? {
+          ...b.report,
+          ...resolveReportTechnician(b.report),
+          reportBranch: repBranch || b.report.reportBranch || null,
+          reportBranchId: repBranch?.id || b.report.reportBranchId || null,
+        } : null;
+        return { ...b, address, report };
       })
     );
 
@@ -77,6 +84,21 @@ const resolveReportTechnician = (r: any) => {
   }
 
   return { technicianName, technicianQualification, technicianSignatureUrl };
+};
+
+const resolveReportBranch = (r: any) => {
+  if (r.reportBranch) {
+    return r.reportBranch;
+  }
+  if (r.internalNotes && r.internalNotes.includes('[BRANCH:')) {
+    try {
+      const match = r.internalNotes.match(/\[BRANCH:(\{.*?\})\]/);
+      if (match && match[1]) {
+        return JSON.parse(match[1]);
+      }
+    } catch (e) {}
+  }
+  return null;
 };
 
 export const getAllReports = async (req: AuthRequest, res: Response) => {
@@ -128,9 +150,12 @@ export const getAllReports = async (req: AuthRequest, res: Response) => {
           address = await prisma.address.findUnique({ where: { id: r.booking.addressId } });
         }
         const tech = resolveReportTechnician(r);
+        const branch = resolveReportBranch(r);
         return {
           ...r,
           ...tech,
+          reportBranch: branch || r.reportBranch || null,
+          reportBranchId: branch?.id || r.reportBranchId || null,
           booking: r.booking ? {
             ...r.booking,
             address: address || r.booking.user?.addresses?.[0] || null,
@@ -196,10 +221,13 @@ export const getReportById = async (req: AuthRequest, res: Response) => {
     }
 
     const tech = resolveReportTechnician(report);
+    const repBranch = resolveReportBranch(report);
 
     const reportWithAddress = {
       ...report,
       ...tech,
+      reportBranch: repBranch || report.reportBranch || null,
+      reportBranchId: repBranch?.id || report.reportBranchId || null,
       doctorSignatureUrl: signatureUrl,
       booking: report.booking ? {
         ...report.booking,
@@ -219,7 +247,7 @@ export const createReport = async (req: AuthRequest, res: Response) => {
     const {
       bookingId, testName, clinicalNotes, technicianRemarks, doctorRemarks, internalNotes,
       parameters, recipientType, recipientId,
-      reportBranchId, doctorName, doctorQualification, doctorRegNo, doctorDesignation, doctorVerifiedAt,
+      reportBranchId, branchDetails, doctorName, doctorQualification, doctorRegNo, doctorDesignation, doctorVerifiedAt,
       doctorSignatureUrl,
       technicianName, technicianQualification, technicianSignatureUrl,
     } = req.body;
@@ -231,6 +259,48 @@ export const createReport = async (req: AuthRequest, res: Response) => {
 
     const hasAbnormal = parameters.some((p: any) => p.isAbnormal);
 
+    let finalReportBranchId: string | null = null;
+    let resolvedBranchData: any = branchDetails || null;
+
+    if (reportBranchId) {
+      const realBranch = await prisma.branch.findUnique({ where: { id: reportBranchId } });
+      if (realBranch) {
+        finalReportBranchId = realBranch.id;
+        resolvedBranchData = {
+          id: realBranch.id,
+          name: realBranch.name,
+          line1: realBranch.line1 || '',
+          city: realBranch.city || '',
+          state: realBranch.state || '',
+          pincode: realBranch.pincode || '',
+          contactNumber: realBranch.contactNumber || '',
+          email: realBranch.email || '',
+          labRegNo: realBranch.labRegNo || '',
+          isPartnerLab: false,
+        };
+      } else {
+        const partner = await prisma.pathologyPartner.findUnique({
+          where: { id: reportBranchId },
+          include: { user: true },
+        });
+        if (partner) {
+          finalReportBranchId = null;
+          resolvedBranchData = {
+            id: partner.id,
+            name: partner.labName || 'Partner Lab',
+            line1: partner.address || partner.city || '',
+            city: partner.city || '',
+            state: partner.state || '',
+            pincode: partner.pincode || '',
+            contactNumber: partner.user?.mobile || '',
+            email: partner.user?.email || '',
+            labRegNo: '',
+            isPartnerLab: true,
+          };
+        }
+      }
+    }
+
     let finalInternalNotes = internalNotes || '';
     if (technicianName || technicianQualification || technicianSignatureUrl) {
       const techJson = JSON.stringify({
@@ -240,6 +310,12 @@ export const createReport = async (req: AuthRequest, res: Response) => {
       });
       finalInternalNotes = finalInternalNotes.replace(/\[TECH:\{.*?\}\]/g, '').trim();
       finalInternalNotes = `${finalInternalNotes} [TECH:${techJson}]`.trim();
+    }
+
+    if (resolvedBranchData) {
+      const branchJson = JSON.stringify(resolvedBranchData);
+      finalInternalNotes = finalInternalNotes.replace(/\[BRANCH:\{.*?\}\]/g, '').replace(/\[BRANCH_ID:[^\]]+\]/g, '').trim();
+      finalInternalNotes = `${finalInternalNotes} [BRANCH:${branchJson}] [BRANCH_ID:${resolvedBranchData.id}]`.trim();
     }
 
     const report = await (prisma as any).report.create({
@@ -254,11 +330,7 @@ export const createReport = async (req: AuthRequest, res: Response) => {
         hasAbnormalFlags: hasAbnormal,
         recipientType: recipientType || 'USER',
         recipientId: recipientId || null,
-        reportBranchId: await (async () => {
-          if (!reportBranchId) return null;
-          const branch = await prisma.branch.findUnique({ where: { id: reportBranchId } });
-          return branch ? reportBranchId : null;
-        })(),
+        reportBranchId: finalReportBranchId,
         doctorName: doctorName || null,
         doctorQualification: doctorQualification || null,
         doctorRegNo: doctorRegNo || null,
@@ -289,7 +361,12 @@ export const createReport = async (req: AuthRequest, res: Response) => {
       include: { parameters: true, auditLogs: true, reportBranch: true },
     });
 
-    res.status(201).json(report);
+    const repBranch = resolveReportBranch(report) || resolvedBranchData;
+    res.status(201).json({
+      ...report,
+      reportBranch: repBranch || report.reportBranch || null,
+      reportBranchId: repBranch?.id || report.reportBranchId || null,
+    });
   } catch (error: any) {
     console.error('Failed to create report:', error);
     res.status(500).json({ error: 'Failed to create report', details: error.message });
@@ -300,7 +377,7 @@ export const updateReportDraft = async (req: AuthRequest, res: Response) => {
     const { id } = req.params;
     const {
       clinicalNotes, technicianRemarks, doctorRemarks, internalNotes, parameters,
-      reportBranchId, doctorName, doctorQualification, doctorRegNo, doctorDesignation, doctorVerifiedAt,
+      reportBranchId, branchDetails, doctorName, doctorQualification, doctorRegNo, doctorDesignation, doctorVerifiedAt,
       doctorSignatureUrl,
       technicianName, technicianQualification, technicianSignatureUrl,
     } = req.body;
@@ -314,6 +391,55 @@ export const updateReportDraft = async (req: AuthRequest, res: Response) => {
     await prisma.reportResult.deleteMany({ where: { reportId: id } });
 
     const hasAbnormal = parameters.some((p: any) => p.isAbnormal);
+
+    let finalReportBranchId: string | null = null;
+    let resolvedBranchData: any = branchDetails || null;
+
+    if (reportBranchId !== undefined) {
+      if (reportBranchId) {
+        const realBranch = await prisma.branch.findUnique({ where: { id: reportBranchId } });
+        if (realBranch) {
+          finalReportBranchId = realBranch.id;
+          resolvedBranchData = {
+            id: realBranch.id,
+            name: realBranch.name,
+            line1: realBranch.line1 || '',
+            city: realBranch.city || '',
+            state: realBranch.state || '',
+            pincode: realBranch.pincode || '',
+            contactNumber: realBranch.contactNumber || '',
+            email: realBranch.email || '',
+            labRegNo: realBranch.labRegNo || '',
+            isPartnerLab: false,
+          };
+        } else {
+          const partner = await prisma.pathologyPartner.findUnique({
+            where: { id: reportBranchId },
+            include: { user: true },
+          });
+          if (partner) {
+            finalReportBranchId = null;
+            resolvedBranchData = {
+              id: partner.id,
+              name: partner.labName || 'Partner Lab',
+              line1: partner.address || partner.city || '',
+              city: partner.city || '',
+              state: partner.state || '',
+              pincode: partner.pincode || '',
+              contactNumber: partner.user?.mobile || '',
+              email: partner.user?.email || '',
+              labRegNo: '',
+              isPartnerLab: true,
+            };
+          }
+        }
+      } else {
+        finalReportBranchId = null;
+        resolvedBranchData = null;
+      }
+    } else if (report.reportBranchId) {
+      finalReportBranchId = report.reportBranchId;
+    }
 
     let finalInternalNotes = internalNotes !== undefined ? (internalNotes || '') : (report.internalNotes || '');
     if (technicianName !== undefined || technicianQualification !== undefined || technicianSignatureUrl !== undefined) {
@@ -332,6 +458,12 @@ export const updateReportDraft = async (req: AuthRequest, res: Response) => {
       finalInternalNotes = `${finalInternalNotes} [TECH:${techJson}]`.trim();
     }
 
+    if (resolvedBranchData) {
+      const branchJson = JSON.stringify(resolvedBranchData);
+      finalInternalNotes = finalInternalNotes.replace(/\[BRANCH:\{.*?\}\]/g, '').replace(/\[BRANCH_ID:[^\]]+\]/g, '').trim();
+      finalInternalNotes = `${finalInternalNotes} [BRANCH:${branchJson}] [BRANCH_ID:${resolvedBranchData.id}]`.trim();
+    }
+
     const updated = await (prisma as any).report.update({
       where: { id },
       data: {
@@ -340,11 +472,7 @@ export const updateReportDraft = async (req: AuthRequest, res: Response) => {
         doctorRemarks: doctorRemarks || null,
         internalNotes: finalInternalNotes || null,
         hasAbnormalFlags: hasAbnormal,
-        reportBranchId: await (async () => {
-          if (!reportBranchId) return null;
-          const branch = await prisma.branch.findUnique({ where: { id: reportBranchId } });
-          return branch ? reportBranchId : null;
-        })(),
+        reportBranchId: finalReportBranchId,
         doctorName: doctorName || null,
         doctorQualification: doctorQualification || null,
         doctorRegNo: doctorRegNo || null,
@@ -375,7 +503,12 @@ export const updateReportDraft = async (req: AuthRequest, res: Response) => {
       include: { parameters: true, auditLogs: true, reportBranch: true },
     });
 
-    res.json(updated);
+    const repBranch = resolveReportBranch(updated) || resolvedBranchData;
+    res.json({
+      ...updated,
+      reportBranch: repBranch || updated.reportBranch || null,
+      reportBranchId: repBranch?.id || updated.reportBranchId || null,
+    });
   } catch (error: any) {
     console.error('Failed to update report draft:', error);
     res.status(500).json({ error: 'Failed to update draft', details: error.message });
@@ -430,7 +563,7 @@ const finalized = await prisma.report.update({
           },
         },
       },
-      include: { parameters: true, auditLogs: true, booking: true },
+      include: { parameters: true, auditLogs: true, booking: true, reportBranch: true },
     });
 
 const bookingForFinalize = await prisma.booking.findUnique({
@@ -467,7 +600,12 @@ sendNotificationToUser(
         await autoConsumeForTest(bt.testId, finalized.booking.bookingCode, req.user?.id);
       }
     }
-    res.json(finalized);
+    const repBranch = resolveReportBranch(finalized);
+    res.json({
+      ...finalized,
+      reportBranch: repBranch || (finalized as any).reportBranch || null,
+      reportBranchId: repBranch?.id || finalized.reportBranchId || null,
+    });
   } catch (error: any) {
     console.error('Failed to finalize report:', error);
     res.status(500).json({ error: 'Failed to finalize report', details: error.message });
@@ -882,7 +1020,7 @@ export const getPublicReportVerification = async (req: Request, res: Response) =
       testNames.push(report.testName);
     }
 
-    const branch = report.reportBranch || report.booking?.branch;
+    const branch = resolveReportBranch(report) || report.reportBranch || report.booking?.branch;
 
     res.json({
       verified: true,
