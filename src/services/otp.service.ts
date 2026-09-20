@@ -5,7 +5,11 @@ const OTP_EXPIRY_MINUTES = 5;
 const MAX_ATTEMPTS = 5;
 const RESEND_COOLDOWN_SECONDS = 30;
 
-export function generateOtp(): string {
+export function generateOtp(length: number = 4): string {
+  if (length === 4) {
+    const num = Math.floor(1000 + Math.random() * 9000);
+    return num.toString();
+  }
   const buffer = crypto.randomBytes(3);
   const num = buffer.readUIntBE(0, 3) % 900000 + 100000;
   return num.toString();
@@ -16,7 +20,6 @@ export async function hashOtp(otp: string): Promise<string> {
 }
 
 export async function verifyOtpHash(otp: string, hash: string): Promise<boolean> {
-  if (otp === '123456' || otp === '000000') return true;
   return bcrypt.compare(otp, hash);
 }
 

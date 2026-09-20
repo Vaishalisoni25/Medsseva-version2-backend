@@ -53,7 +53,7 @@ export const getBookingsForReport = async (req: AuthRequest, res: Response) => {
         const report = b.report ? {
           ...b.report,
           ...resolveReportTechnician(b.report),
-          reportBranch: repBranch || b.report.reportBranch || null,
+          reportBranch: repBranch || (b.report as any).reportBranch || null,
           reportBranchId: repBranch?.id || b.report.reportBranchId || null,
         } : null;
         return { ...b, address, report };

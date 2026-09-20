@@ -4,7 +4,7 @@ import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/prisma';
 import jwt from 'jsonwebtoken';
 import { createAuditLog } from '../services/audit.service';
-import { sendOtpEmail, sendPasswordResetEmail } from '../services/email.service';
+import { sendOtpEmail, sendPasswordResetEmail, sendOtpSms } from '../services/email.service';
 import {
   generateOtp, hashOtp, verifyOtpHash, getOtpExpiry,
   isOtpExpired, isResendAllowed, getResendCooldownRemaining, MAX_ATTEMPTS
@@ -1375,12 +1375,69 @@ export const getMe = async (req: any, res: Response) => {
   }
 };
 
+// In-memory store for mobile OTPs (supports both registered users and new signups)
+interface MobileOtpRecord {
+  otpHash: string;
+  expiresAt: Date;
+  otp?: string;
+  attempts: number;
+}
+const mobileOtpStore = new Map<string, MobileOtpRecord>();
+
 export const sendOtp = async (req: Request, res: Response) => {
   try {
     const { mobile } = req.body;
     if (!mobile) return res.status(400).json({ error: 'Mobile number is required' });
-    return res.json({ success: true, message: 'OTP sent successfully' });
+
+    const cleanMobile = String(mobile).replace(/\D/g, '').slice(-10);
+    if (cleanMobile.length !== 10) {
+      return res.status(400).json({ error: 'Please enter a valid 10-digit mobile number' });
+    }
+
+    const otp = generateOtp(4);
+    const otpHash = await hashOtp(otp);
+    const otpExpiresAt = getOtpExpiry();
+
+    // Store in-memory
+    mobileOtpStore.set(cleanMobile, {
+      otpHash,
+      expiresAt: otpExpiresAt,
+      otp,
+      attempts: 0,
+    });
+
+    // Also persist in DB if user already exists
+    const existingUser = await prisma.user.findFirst({
+      where: { OR: [{ mobile: cleanMobile }, { mobile: String(mobile).trim() }] }
+    });
+    if (existingUser) {
+      await prisma.user.update({
+        where: { id: existingUser.id },
+        data: {
+          otpHash,
+          otpExpiresAt,
+          otpAttempts: 0,
+          otpLastSentAt: new Date(),
+        }
+      });
+    }
+
+    console.log(`[AUTH] Dispatched 4-digit OTP for mobile ${cleanMobile}: ${otp}`);
+
+    // Trigger Brevo Transactional SMS
+    const smsResult = await sendOtpSms(cleanMobile, otp);
+    console.log(`[AUTH] Brevo SMS response for ${cleanMobile}:`, smsResult);
+
+    return res.json({
+      success: true,
+      message: smsResult.sent
+        ? 'Verification code sent to your mobile number via SMS'
+        : 'OTP generated. SMS delivery initiated.',
+      smsSent: smsResult.sent,
+      error: smsResult.error,
+    });
   } catch (error: any) {
+    console.error('[AUTH] sendOtp error:', error);
     res.status(500).json({ error: 'Failed to send OTP', details: error.message });
   }
 };
@@ -1389,11 +1446,69 @@ export const verifyOtp = async (req: Request, res: Response) => {
   try {
     const { mobile, otp } = req.body;
     if (!mobile || !otp) return res.status(400).json({ error: 'Mobile and OTP are required' });
-    const isDevTestOtp = process.env.NODE_ENV !== 'production' || process.env.DEV_TEST_OTP_ENABLED === 'true';
-    const validOtps = isDevTestOtp ? ['1234', '123456', process.env.DEV_TEST_OTP || '123456'] : ['1234', process.env.DEV_TEST_OTP || '123456'];
-    if (!validOtps.includes(String(otp))) return res.status(400).json({ error: 'Invalid OTP' });
-    return res.json({ success: true, message: 'OTP verified' });
+
+    const cleanMobile = String(mobile).replace(/\D/g, '').slice(-10);
+    const enteredOtp = String(otp).trim();
+
+    // 1. Check in-memory store
+    const memRecord = mobileOtpStore.get(cleanMobile);
+    if (memRecord) {
+      if (new Date() > memRecord.expiresAt) {
+        mobileOtpStore.delete(cleanMobile);
+        return res.status(400).json({ error: 'OTP has expired. Please request a new code.' });
+      }
+      if (memRecord.attempts >= MAX_ATTEMPTS) {
+        mobileOtpStore.delete(cleanMobile);
+        return res.status(429).json({ error: 'Too many incorrect attempts. Please request a new OTP.' });
+      }
+
+      const isValid = await verifyOtpHash(enteredOtp, memRecord.otpHash);
+      if (!isValid) {
+        memRecord.attempts += 1;
+        const remaining = MAX_ATTEMPTS - memRecord.attempts;
+        return res.status(400).json({
+          error: remaining > 0 ? `Incorrect OTP. ${remaining} attempt(s) remaining.` : 'Too many incorrect attempts.',
+        });
+      }
+
+      mobileOtpStore.delete(cleanMobile);
+      return res.json({ success: true, message: 'OTP verified successfully' });
+    }
+
+    // 2. Check database user
+    const user = await prisma.user.findFirst({
+      where: { OR: [{ mobile: cleanMobile }, { mobile: String(mobile).trim() }] }
+    });
+    if (!user || !user.otpHash || !user.otpExpiresAt) {
+      return res.status(400).json({ error: 'No active OTP found. Please request a verification code first.' });
+    }
+    if (isOtpExpired(user.otpExpiresAt)) {
+      return res.status(400).json({ error: 'OTP has expired. Please request a new code.' });
+    }
+    if (user.otpAttempts >= MAX_ATTEMPTS) {
+      return res.status(429).json({ error: 'Too many incorrect attempts. Please request a new OTP.' });
+    }
+
+    const isValid = await verifyOtpHash(enteredOtp, user.otpHash);
+    if (!isValid) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { otpAttempts: { increment: 1 } },
+      });
+      const remaining = MAX_ATTEMPTS - (user.otpAttempts + 1);
+      return res.status(400).json({
+        error: remaining > 0 ? `Incorrect OTP. ${remaining} attempt(s) remaining.` : 'Too many incorrect attempts.',
+      });
+    }
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { otpHash: null, otpExpiresAt: null, otpAttempts: 0 },
+    });
+
+    return res.json({ success: true, message: 'OTP verified successfully' });
   } catch (error: any) {
+    console.error('[AUTH] verifyOtp error:', error);
     res.status(500).json({ error: 'Failed to verify OTP', details: error.message });
   }
 };
@@ -1402,11 +1517,68 @@ export const loginWithOtp = async (req: Request, res: Response) => {
   try {
     const { mobile, otp } = req.body;
     if (!mobile || !otp) return res.status(400).json({ error: 'Mobile and OTP are required' });
-    const isDevTestOtp = process.env.NODE_ENV !== 'production' || process.env.DEV_TEST_OTP_ENABLED === 'true';
-    const validOtps = isDevTestOtp ? ['1234', '123456', process.env.DEV_TEST_OTP || '123456'] : ['1234', process.env.DEV_TEST_OTP || '123456'];
-    if (!validOtps.includes(String(otp))) return res.status(400).json({ error: 'Invalid OTP' });
 
-    const user = await prisma.user.findUnique({ where: { mobile } });
+    const cleanMobile = String(mobile).replace(/\D/g, '').slice(-10);
+    const enteredOtp = String(otp).trim();
+
+    // Verify OTP from memory or DB
+    const memRecord = mobileOtpStore.get(cleanMobile);
+    let isOtpValid = false;
+
+    if (memRecord) {
+      if (new Date() > memRecord.expiresAt) {
+        mobileOtpStore.delete(cleanMobile);
+        return res.status(400).json({ error: 'OTP has expired. Please request a new code.' });
+      }
+      if (memRecord.attempts >= MAX_ATTEMPTS) {
+        mobileOtpStore.delete(cleanMobile);
+        return res.status(429).json({ error: 'Too many incorrect attempts. Please request a new OTP.' });
+      }
+
+      isOtpValid = await verifyOtpHash(enteredOtp, memRecord.otpHash);
+      if (!isOtpValid) {
+        memRecord.attempts += 1;
+        const remaining = MAX_ATTEMPTS - memRecord.attempts;
+        return res.status(400).json({
+          error: remaining > 0 ? `Incorrect OTP. ${remaining} attempt(s) remaining.` : 'Too many incorrect attempts.',
+        });
+      }
+      mobileOtpStore.delete(cleanMobile);
+    } else {
+      const userForOtp = await prisma.user.findFirst({
+        where: { OR: [{ mobile: cleanMobile }, { mobile: String(mobile).trim() }] }
+      });
+      if (!userForOtp || !userForOtp.otpHash || !userForOtp.otpExpiresAt) {
+        return res.status(400).json({ error: 'No active OTP found. Please request a verification code first.' });
+      }
+      if (isOtpExpired(userForOtp.otpExpiresAt)) {
+        return res.status(400).json({ error: 'OTP has expired. Please request a new code.' });
+      }
+      if (userForOtp.otpAttempts >= MAX_ATTEMPTS) {
+        return res.status(429).json({ error: 'Too many incorrect attempts. Please request a new OTP.' });
+      }
+
+      isOtpValid = await verifyOtpHash(enteredOtp, userForOtp.otpHash);
+      if (!isOtpValid) {
+        await prisma.user.update({
+          where: { id: userForOtp.id },
+          data: { otpAttempts: { increment: 1 } },
+        });
+        const remaining = MAX_ATTEMPTS - (userForOtp.otpAttempts + 1);
+        return res.status(400).json({
+          error: remaining > 0 ? `Incorrect OTP. ${remaining} attempt(s) remaining.` : 'Too many incorrect attempts.',
+        });
+      }
+
+      await prisma.user.update({
+        where: { id: userForOtp.id },
+        data: { otpHash: null, otpExpiresAt: null, otpAttempts: 0 },
+      });
+    }
+
+    const user = await prisma.user.findFirst({
+      where: { OR: [{ mobile: cleanMobile }, { mobile: String(mobile).trim() }] }
+    });
     if (!user) return res.status(404).json({ error: 'This mobile number is not registered. Please register first.' });
 
     if (user.role === 'EXECUTIVE') {

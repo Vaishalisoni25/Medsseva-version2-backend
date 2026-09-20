@@ -293,6 +293,48 @@ export async function sendReportEmail(toEmail: string, details: ReportDeliveryDe
   }
 }
 
+export async function sendOtpSms(toMobile: string, otp: string): Promise<{ sent: boolean; messageId?: string; error?: string }> {
+  const apiKey = process.env.BREVO_API_KEY;
+  if (!apiKey) {
+    return { sent: false, error: 'BREVO_API_KEY is not configured' };
+  }
+
+  let cleanMobile = toMobile.replace(/[^0-9]/g, '');
+  if (cleanMobile.length === 10) {
+    cleanMobile = `91${cleanMobile}`;
+  }
+
+  const smsText = `Your MedsSeva verification code is ${otp}. Valid for 5 minutes. Do not share this code with anyone.`;
+
+  try {
+    const response = await fetch('https://api.brevo.com/v3/transactionalSMS/sms', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'api-key': apiKey,
+      },
+      body: JSON.stringify({
+        sender: 'MedsSeva',
+        recipient: cleanMobile,
+        content: smsText,
+        type: 'transactional',
+      }),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      console.warn(`[Brevo SMS Dispatch] HTTP ${response.status}: ${errorBody}`);
+      return { sent: false, error: errorBody };
+    }
+
+    const data = await response.json();
+    return { sent: true, messageId: data.messageId || 'sms_sent' };
+  } catch (err: any) {
+    console.warn('[Brevo SMS Dispatch Error]', err);
+    return { sent: false, error: err.message };
+  }
+}
+
 export async function sendReportSMS(toMobile: string, details: ReportDeliveryDetails): Promise<{ sent: boolean; messageId?: string; error?: string }> {
   const apiKey = process.env.BREVO_API_KEY;
   if (!apiKey) {
@@ -307,7 +349,7 @@ export async function sendReportSMS(toMobile: string, details: ReportDeliveryDet
   const smsText = `Dear ${details.patientName}, your MedsSeva diagnostic report (${details.bookingCode}) is ready. Verify & download: ${details.verificationUrl}`;
 
   try {
-    const response = await fetch('https://api.brevo.com/v3/transactionalSMS/sms-send', {
+    const response = await fetch('https://api.brevo.com/v3/transactionalSMS/sms', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
