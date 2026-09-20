@@ -501,7 +501,7 @@ export const sendReport = async (req: AuthRequest, res: Response) => {
     });
 
     if (!report) return res.status(404).json({ error: 'Report not found' });
-    if (report.status !== 'APPROVED' && report.status !== 'RELEASED') {
+    if (report.status !== 'VERIFIED' && report.status !== 'PUBLISHED') {
       return res.status(400).json({ error: 'Only finalized reports can be sent' });
     }
 
