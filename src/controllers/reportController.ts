@@ -751,7 +751,7 @@ export const getMyReports = async (req: AuthRequest, res: Response) => {
 
     const reports = await prisma.report.findMany({
       where: {
-        status: { in: ['RELEASED', 'APPROVED'] },
+        status: { in: ['PUBLISHED', 'VERIFIED'] },
         OR: [
           { booking: { userId: req.user.id } },
           { recipientId: req.user.id },
