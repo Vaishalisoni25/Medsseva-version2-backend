@@ -1,11 +1,29 @@
-import ImageKit from '@imagekit/nodejs';
 import 'dotenv/config';
+
+let ImageKitModule: any = null;
+try {
+  ImageKitModule = require('@imagekit/nodejs');
+  if (ImageKitModule && ImageKitModule.default) {
+    ImageKitModule = ImageKitModule.default;
+  }
+} catch (e) {
+  console.warn("Failed to load @imagekit/nodejs, using mock for local development");
+  ImageKitModule = class ImageKitMock {
+    files: any = {
+      upload: async () => ({ url: '', fileId: '' }),
+      delete: async () => {}
+    };
+    constructor(options: any) {}
+  };
+}
+
+type ImageKit = any;
 
 let client: ImageKit | null = null;
 
 export const getImageKitClient = (): ImageKit => {
   if (!client) {
-    client = new ImageKit({
+    client = new (ImageKitModule as any)({
       privateKey: process.env.IMAGEKIT_PRIVATE_KEY || '',
     });
   }

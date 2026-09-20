@@ -21,14 +21,6 @@ const logCmsAction = async (
 
 export const getBanners = async (req: AuthRequest, res: Response) => {
   try {
-    const banners = await prisma.cmsBanner.findMany({ orderBy: { displayOrder: 'asc' } });
-    const mappedBanners = banners.map(b => {
-      if (b.title.startsWith('[PROMO]')) {
-        return { ...b, title: b.title.replace('[PROMO]', '').trim(), bannerType: 'PROMO' };
-      }
-      return { ...b, bannerType: 'HERO' };
-    });
-    res.json({ banners: mappedBanners });
     const { type } = req.query;
     const where: any = {};
     if (type && typeof type === 'string') {
@@ -46,7 +38,6 @@ export const getBanners = async (req: AuthRequest, res: Response) => {
 
 export const createBanner = async (req: AuthRequest, res: Response) => {
   try {
-    const { title, subtitle, description, imageUrl, imagePublicId, linkType, linkValue, priority, displayOrder, startDate, endDate, cities, branches, bannerType } = req.body;
     const {
       title,
       subtitle,
@@ -64,11 +55,8 @@ export const createBanner = async (req: AuthRequest, res: Response) => {
       branches,
     } = req.body;
     if (!title || !imageUrl) return res.status(400).json({ error: 'title and imageUrl are required' });
-    const finalTitle = bannerType === 'PROMO' ? `[PROMO] ${title}` : title;
     const banner = await prisma.cmsBanner.create({
       data: {
-        title: finalTitle, subtitle, description, imageUrl, imagePublicId,
-        linkType: linkType || 'Package', linkValue,
         title,
         subtitle,
         description,
@@ -89,9 +77,6 @@ export const createBanner = async (req: AuthRequest, res: Response) => {
     });
     await logCmsAction(req.user?.id, req.user?.role, 'BANNER_CREATED', 'CmsBanner', banner.id, { title, bannerType: banner.bannerType });
     res.status(201).json({ banner });
-  } catch (error: any) {
-    console.error('BANNER CREATE ERROR:', error);
-    res.status(500).json({ error: 'Failed to create banner', details: error.message });
   } catch (error: any) {
     console.error('CREATE BANNER ERROR:', error);
     res.status(500).json({ error: 'Failed to create banner', details: error?.message });
