@@ -115,6 +115,127 @@ function buildPasswordResetEmailHtml(userName: string, otp: string): string {
 </html>`;
 }
 
+function buildWelcomeEmailHtml(userName: string, roleName: string = 'Patient'): string {
+  let roleTitle = 'Patient';
+  let welcomeBody = 'Thank you for joining MedsSeva. You can now easily book certified blood tests, schedule home sample collections, and access your verified clinical reports anytime on your mobile app.';
+
+  if (roleName === 'Doctor') {
+    roleTitle = 'Doctor';
+    welcomeBody = 'Thank you for registering with the MedsSeva Clinical Network. Your medical profile and credentials have been received and are currently under review by our medical board. Once approved, you will be able to review patient diagnostic reports, manage digital prescriptions, and view referral insights.';
+  } else if (roleName === 'Phlebotomist') {
+    roleTitle = 'Phlebotomist';
+    welcomeBody = 'Thank you for applying to become a certified MedsSeva Sample Collection Partner. Your application and submitted documents are under review. Once verified by admin, you will be authorized to accept home collection requests and serve patients in your area.';
+  } else if (roleName === 'Pathology Partner') {
+    roleTitle = 'Pathology Lab Partner';
+    welcomeBody = 'Thank you for registering your diagnostic lab with the MedsSeva Partner Network. Your lab details and clinical accreditation documents are under review. Once approved, your laboratory will be listed for diagnostic testing and partner referrals.';
+  }
+
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Welcome to MedsSeva</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f1f5f9;font-family:'Segoe UI',Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f1f5f9;padding:40px 0;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+          <tr>
+            <td style="background:linear-gradient(135deg,#0F766E 0%,#0d9488 100%);padding:36px 40px;text-align:center;">
+              <h1 style="margin:0;color:#ffffff;font-size:26px;font-weight:800;letter-spacing:1px;">MedsSeva</h1>
+              <p style="margin:6px 0 0;color:#99f6e4;font-size:13px;letter-spacing:2px;">SMART DIAGNOSTICS. BETTER CARE.</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:40px 40px 24px;">
+              <p style="margin:0 0 8px;font-size:18px;color:#0F766E;font-weight:700;">Welcome to MedsSeva!</p>
+              <p style="margin:0 0 16px;font-size:16px;color:#334155;">Hello <strong>${userName}</strong>,</p>
+              <p style="margin:0 0 24px;font-size:15px;color:#64748b;line-height:1.6;">
+                ${welcomeBody}
+              </p>
+
+              <div style="background:#f0fdfa;border:1px solid #ccfbf1;border-radius:12px;padding:20px;margin-bottom:28px;">
+                <p style="margin:0 0 12px;font-size:14px;font-weight:700;color:#0F766E;">What you get with MedsSeva:</p>
+                <table width="100%" style="font-size:13px;color:#475569;line-height:1.8;">
+                  <tr>
+                    <td>🧪 <strong>NABL & ISO Accredited Labs</strong></td>
+                  </tr>
+                  <tr>
+                    <td>🏠 <strong>Hassle-Free Home Sample Collection</strong></td>
+                  </tr>
+                  <tr>
+                    <td>📱 <strong>Direct WhatsApp & In-App Report Delivery</strong></td>
+                  </tr>
+                  <tr>
+                    <td>🔒 <strong>100% Confidential Health Records</strong></td>
+                  </tr>
+                </table>
+              </div>
+
+              <p style="margin:0 0 4px;font-size:14px;color:#334155;font-weight:600;">Registered Role:</p>
+              <p style="margin:0 0 24px;font-size:14px;color:#0F766E;font-weight:700;">${roleTitle}</p>
+
+              <p style="margin:0 0 8px;font-size:13px;color:#94a3b8;line-height:1.5;">
+                If you have any questions or need support, our medical care team is always here to assist you.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background:#f8fafc;padding:24px 40px;border-top:1px solid #e2e8f0;text-align:center;">
+              <p style="margin:0 0 4px;font-size:13px;font-weight:700;color:#0F766E;">MedsSeva Diagnostics</p>
+              <p style="margin:0 0 4px;font-size:12px;color:#94a3b8;">Smart Diagnostics. Better Care.</p>
+              <p style="margin:0;font-size:12px;color:#94a3b8;">
+                Support: <a href="mailto:medssevaofficial@gmail.com" style="color:#0F766E;text-decoration:none;">medssevaofficial@gmail.com</a>
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
+export async function sendWelcomeEmail(toEmail: string, toName: string, roleName: string = 'Patient'): Promise<void> {
+  const apiKey = process.env.BREVO_API_KEY;
+  if (!apiKey) {
+    console.warn('[Welcome Email] BREVO_API_KEY not configured, skipping.');
+    return;
+  }
+
+  const payload = {
+    sender: getSender(),
+    to: [{ email: toEmail, name: toName }],
+    subject: `Welcome to MedsSeva Diagnostics, ${toName}!`,
+    htmlContent: buildWelcomeEmailHtml(toName, roleName),
+  };
+
+  try {
+    const response = await fetch(BREVO_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'api-key': apiKey,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      console.warn(`[Welcome Email Error] ${response.status}: ${errorBody}`);
+    } else {
+      console.log(`[Welcome Email] Successfully sent to ${toEmail} (${roleName})`);
+    }
+  } catch (err: any) {
+    console.warn('[Welcome Email Send Error]', err.message);
+  }
+}
+
+
 export async function sendOtpEmail(toEmail: string, toName: string, otp: string): Promise<void> {
   const apiKey = process.env.BREVO_API_KEY;
   if (!apiKey) throw new Error('BREVO_API_KEY is not configured');

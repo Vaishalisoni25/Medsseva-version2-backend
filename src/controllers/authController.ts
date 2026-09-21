@@ -4,7 +4,7 @@ import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/prisma';
 import jwt from 'jsonwebtoken';
 import { createAuditLog } from '../services/audit.service';
-import { sendOtpEmail, sendPasswordResetEmail, sendOtpSms } from '../services/email.service';
+import { sendOtpEmail, sendPasswordResetEmail, sendOtpSms, sendWelcomeEmail } from '../services/email.service';
 import {
   generateOtp, hashOtp, verifyOtpHash, getOtpExpiry,
   isOtpExpired, isResendAllowed, getResendCooldownRemaining, MAX_ATTEMPTS
@@ -88,6 +88,10 @@ export const registerDoctor = async (req: Request, res: Response) => {
     });
 
     console.log('[AUTH] <<< Doctor registration successful:', { doctorId: doctor.id, userId: user.id, code: doctor.code });
+
+    if (user.email) {
+      sendWelcomeEmail(user.email, user.name, 'Doctor').catch(err => console.warn('[Welcome Email Doctor Error]', err.message));
+    }
 
     res.status(201).json({
       message: 'Doctor registration submitted successfully. Awaiting verification.',
@@ -233,6 +237,10 @@ export const registerPartner = async (req: Request, res: Response) => {
         })),
         skipDuplicates: true
       });
+    }
+
+    if (user.email) {
+      sendWelcomeEmail(user.email, user.name, 'Pathology Partner').catch(err => console.warn('[Welcome Email Partner Error]', err.message));
     }
 
     res.status(201).json({
@@ -402,6 +410,10 @@ export const registerPhlebotomist = async (req: Request, res: Response) => {
       }).catch(err => console.warn('Phlebotomist document save error non-fatal:', err.message));
     }
 
+    if (user.email) {
+      sendWelcomeEmail(user.email, user.name, 'Phlebotomist').catch(err => console.warn('[Welcome Email Phlebotomist Error]', err.message));
+    }
+
     res.status(201).json({
       message: 'Phlebotomist application submitted. Awaiting admin approval.',
       pendingApproval: true
@@ -512,6 +524,10 @@ export const register = async (req: Request, res: Response) => {
       } catch (smsError: any) {
         console.warn('[AUTH] Registration SMS send warning:', smsError.message);
       }
+    }
+
+    if (user.email) {
+      sendWelcomeEmail(user.email, user.name, 'Patient').catch(err => console.warn('[Welcome Email Patient Error]', err.message));
     }
 
     const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '30d' });
