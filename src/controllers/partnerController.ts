@@ -1232,16 +1232,35 @@ export const getPartnerStats = async (req: any, res: Response) => {
     const partner = await getOrFindPartner(req.user.id, req.user.role);
     const partnerId = partner?.id;
 
+    const queryDateStr = req.query.date as string;
+    const targetDate = queryDateStr ? new Date(queryDateStr) : new Date();
+    
+    // Normalize targetDate to midnight
+    const startOfDay = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate());
+    const endOfDay = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000);
+
+    const prevStartOfDay = new Date(startOfDay.getTime() - 24 * 60 * 60 * 1000);
+    const prevEndOfDay = new Date(startOfDay.getTime());
+
     const whereCollector: any[] = [
       { assignedExecutiveId: req.user.id },
       { paymentReceivedById: req.user.id },
     ];
     if (partnerId) whereCollector.push({ assignedPartnerId: partnerId });
 
-    const [totalAssignedBookings, pendingCount, acceptedCount, completedToday] = await Promise.all([
+    // Helper to build date filter
+    const dateFilter = (start: Date, end: Date) => ({
+      scheduledDate: {
+        gte: start,
+        lt: end,
+      }
+    });
+
+    const [totalAssignedBookings, pendingCount, acceptedCount, completedToday, prevTotalJobs] = await Promise.all([
       prisma.booking.count({
         where: {
           OR: whereCollector,
+          ...dateFilter(startOfDay, endOfDay)
         }
       }),
       prisma.booking.count({
@@ -1257,22 +1276,39 @@ export const getPartnerStats = async (req: any, res: Response) => {
               assignedExecutiveId: null,
               assignedPartnerId: null,
             }
-          ]
+          ],
+          ...dateFilter(startOfDay, endOfDay)
         }
       }),
       prisma.booking.count({
         where: {
           OR: whereCollector,
-          status: { in: ['ACCEPTED', 'ON_THE_WAY', 'REACHED_LOCATION', 'SAMPLE_COLLECTED', 'DELIVERING_TO_BRANCH'] }
+          status: { in: ['ACCEPTED', 'ON_THE_WAY', 'REACHED_LOCATION', 'SAMPLE_COLLECTED', 'DELIVERING_TO_BRANCH'] },
+          ...dateFilter(startOfDay, endOfDay)
         }
       }),
       prisma.booking.count({
         where: {
           OR: whereCollector,
           status: { in: ['DELIVERED_TO_LAB', 'PROCESSING', 'REPORT_READY', 'COMPLETED'] },
+          ...dateFilter(startOfDay, endOfDay)
         }
       }),
+      // Previous day total jobs
+      prisma.booking.count({
+        where: {
+          OR: whereCollector,
+          ...dateFilter(prevStartOfDay, prevEndOfDay)
+        }
+      })
     ]);
+
+    let trendPercentage = 0;
+    if (prevTotalJobs > 0) {
+      trendPercentage = Math.round(((totalAssignedBookings - prevTotalJobs) / prevTotalJobs) * 100);
+    } else if (totalAssignedBookings > 0) {
+      trendPercentage = 100;
+    }
 
     res.json({
       todayJobs: totalAssignedBookings,
@@ -1282,6 +1318,7 @@ export const getPartnerStats = async (req: any, res: Response) => {
       completedPercent: totalAssignedBookings > 0 ? Math.round((completedToday / totalAssignedBookings) * 100) : 0,
       totalCollections: partner?.totalCollections || completedToday,
       rating: partner?.rating || 5.0,
+      trendPercentage,
     });
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to fetch stats', details: error.message });
@@ -1385,5 +1422,73 @@ export const assignPartnerStaff = async (req: any, res: Response) => {
     res.json(updated);
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to assign staff', details: error.message });
+  }
+};
+
+export const getPartnerEarnings = async (req: any, res: Response) => {
+  try {
+    const partner = await getOrFindPartner(req.user.id, req.user.role);
+    if (!partner) return res.status(404).json({ error: 'Partner profile not found.' });
+
+    const transactions = await prisma.partnerWalletTransaction.findMany({
+      where: { partnerId: partner.id },
+      include: {
+        booking: { select: { bookingCode: true, patientName: true } }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    res.json({
+      walletBalance: partner.walletBalance,
+      payoutFrequency: partner.paymentCycle || 'MONTHLY',
+      commissionRate: partner.commissionRate || 30.0,
+      transactions
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to fetch earnings', details: error.message });
+  }
+};
+
+export const updatePayoutFrequency = async (req: any, res: Response) => {
+  try {
+    const { frequency } = req.body;
+    const partner = await getOrFindPartner(req.user.id, req.user.role);
+    if (!partner) return res.status(404).json({ error: 'Partner profile not found.' });
+
+    if (!['DAILY', 'WEEKLY', 'MONTHLY'].includes(frequency)) {
+      return res.status(400).json({ error: 'Invalid payout frequency' });
+    }
+
+    const updated = await prisma.pathologyPartner.update({
+      where: { id: partner.id },
+      data: { paymentCycle: frequency }
+    });
+
+    res.json({ success: true, payoutFrequency: updated.paymentCycle });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to update frequency', details: error.message });
+  }
+};
+
+export const updateCommissionRate = async (req: any, res: Response) => {
+  try {
+    const { rate } = req.body;
+    const parsedRate = parseFloat(rate);
+    
+    if (isNaN(parsedRate) || parsedRate < 0 || parsedRate > 100) {
+      return res.status(400).json({ error: 'Invalid commission rate. Must be between 0 and 100.' });
+    }
+
+    const partner = await getOrFindPartner(req.user.id, req.user.role);
+    if (!partner) return res.status(404).json({ error: 'Partner profile not found.' });
+
+    const updated = await prisma.pathologyPartner.update({
+      where: { id: partner.id },
+      data: { commissionRate: parsedRate }
+    });
+
+    res.json({ success: true, commissionRate: updated.commissionRate });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to update commission rate', details: error.message });
   }
 };

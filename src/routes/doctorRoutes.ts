@@ -9,6 +9,7 @@ import {
   createDoctorSamplePickupRequest,
   doctorDirectSampleHandover,
   uploadDoctorSignature,
+  updateDoctorProfileSelf,
 } from '../controllers/doctorController';
 import { authenticate } from '../middlewares/authMiddleware';
 
@@ -43,6 +44,7 @@ router.post(
 );
 
 router.get('/', getDoctors);
+router.patch('/profile/me', authenticate, updateDoctorProfileSelf);
 router.get('/:id', getDoctorById);
 router.post('/pickup-request', createDoctorSamplePickupRequest);
 router.post('/direct-handover', doctorDirectSampleHandover);

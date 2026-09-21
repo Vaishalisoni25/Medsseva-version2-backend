@@ -9,61 +9,61 @@ datasource db {
 }
 
 model User {
-  id                  String          @id @default(uuid())
-  uhid                String?         @unique
-  name                String
-  email               String?         @unique
-  mobile              String          @unique
-  password            String?
-  role                Role            @default(USER)
-  avatarUrl           String?
-  healthScore         Int             @default(0)
-  dob                 String?
-  gender              String?
-  bloodGroup          String?
-  altMobile           String?
-  emailVerified       Boolean         @default(false)
-  emailVerifiedAt     DateTime?
-  otpHash             String?
-  otpExpiresAt        DateTime?
-  otpAttempts         Int             @default(0)
-  otpLastSentAt       DateTime?
-  referralCode        String?         @unique
-  referredById        String?
-  referredBy          User?           @relation("UserReferrals", fields: [referredById], references: [id])
-  referrals           User[]          @relation("UserReferrals")
-  isFirstTestFreeEligible Boolean     @default(false)
-  firstTestFreeUsed   Boolean         @default(false)
-  walletBalance       Float           @default(0)
-  isActive            Boolean         @default(true)
-  createdAt           DateTime        @default(now())
-  addresses           Address[]
-  bookings            Booking[]
-  familyMembers       Family[]
-  paymentMethods      PaymentMethod[]
-  upiMethods          UpiMethod[]
-  verifiedReports     Report[]        @relation("ReportVerifier")
-  paymentsReceived    Booking[]       @relation("PaymentReceiver")
-  assignedCollections Booking[]       @relation("AssignedExecutive")
-  prescriptions       Prescription[]
-  adminUser           AdminUser?
-  doctor              Doctor?
-  auditLogs           AuditLog[]
-  pathologyPartner    PathologyPartner?
-  conversations       Conversation[]
-  deviceTokens        DeviceToken[]
-  notifications       Notification[]
-  bookingIntents      BookingIntent[]
-  partnerRatings      PartnerRating[]
-  expenses            Expense[]       @relation("UserExpenses")
-  walletTransactions  WalletTransaction[]
+  id                      String              @id @default(uuid())
+  uhid                    String?             @unique
+  name                    String
+  email                   String?             @unique
+  mobile                  String              @unique
+  password                String?
+  role                    Role                @default(USER)
+  avatarUrl               String?
+  healthScore             Int                 @default(0)
+  dob                     String?
+  gender                  String?
+  bloodGroup              String?
+  altMobile               String?
+  emailVerified           Boolean             @default(false)
+  emailVerifiedAt         DateTime?
+  otpHash                 String?
+  otpExpiresAt            DateTime?
+  otpAttempts             Int                 @default(0)
+  otpLastSentAt           DateTime?
+  referralCode            String?             @unique
+  referredById            String?
+  referredBy              User?               @relation("UserReferrals", fields: [referredById], references: [id])
+  referrals               User[]              @relation("UserReferrals")
+  isFirstTestFreeEligible Boolean             @default(false)
+  firstTestFreeUsed       Boolean             @default(false)
+  walletBalance           Float               @default(0)
+  isActive                Boolean             @default(true)
+  createdAt               DateTime            @default(now())
+  addresses               Address[]
+  bookings                Booking[]
+  familyMembers           Family[]
+  paymentMethods          PaymentMethod[]
+  upiMethods              UpiMethod[]
+  verifiedReports         Report[]            @relation("ReportVerifier")
+  paymentsReceived        Booking[]           @relation("PaymentReceiver")
+  assignedCollections     Booking[]           @relation("AssignedExecutive")
+  prescriptions           Prescription[]
+  adminUser               AdminUser?
+  doctor                  Doctor?
+  auditLogs               AuditLog[]
+  pathologyPartner        PathologyPartner?
+  conversations           Conversation[]
+  deviceTokens            DeviceToken[]
+  notifications           Notification[]
+  bookingIntents          BookingIntent[]
+  partnerRatings          PartnerRating[]
+  expenses                Expense[]           @relation("UserExpenses")
+  walletTransactions      WalletTransaction[]
 }
 
 model WalletTransaction {
   id          String   @id @default(uuid())
   userId      String
   amount      Float
-  type        String   // 'CREDIT' | 'DEBIT'
+  type        String // 'CREDIT' | 'DEBIT'
   description String
   bookingId   String?
   createdAt   DateTime @default(now())
@@ -105,6 +105,7 @@ model PaymentMethod {
   createdAt DateTime @default(now())
   user      User     @relation(fields: [userId], references: [id])
 }
+
 model UpiMethod {
   id        String   @id @default(uuid())
   userId    String
@@ -198,14 +199,15 @@ model HealthPackage {
   fastingRequired Boolean          @default(false)
   homeCollection  Boolean          @default(true)
   labVisit        Boolean          @default(true)
-isFeatured      Boolean          @default(false)
-isPopular       Boolean          @default(false)
-isTrending      Boolean          @default(false)
-displayOrder    Int              @default(0)
-isActive        Boolean          @default(true)
-bookings        BookingPackage[]
-testsIncluded   PackageTest[]
+  isFeatured      Boolean          @default(false)
+  isPopular       Boolean          @default(false)
+  isTrending      Boolean          @default(false)
+  displayOrder    Int              @default(0)
+  isActive        Boolean          @default(true)
+  bookings        BookingPackage[]
+  testsIncluded   PackageTest[]
 }
+
 model PackageTest {
   packageId String
   testId    String
@@ -216,20 +218,20 @@ model PackageTest {
 }
 
 model BookingIntent {
-  id               String    @id @default(cuid())
-  razorpayOrderId  String    @unique
-  idempotencyKey   String    @unique
-  userId           String
-  status           String    @default("PENDING_PAYMENT")
-  bookingPayload   Json
-  pricingSnapshot  Json
-  expiresAt        DateTime
-  completedAt      DateTime?
-  bookingId        String?   @unique
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
-  user             User      @relation(fields: [userId], references: [id])
-  booking          Booking?  @relation(fields: [bookingId], references: [id])
+  id              String    @id @default(cuid())
+  razorpayOrderId String    @unique
+  idempotencyKey  String    @unique
+  userId          String
+  status          String    @default("PENDING_PAYMENT")
+  bookingPayload  Json
+  pricingSnapshot Json
+  expiresAt       DateTime
+  completedAt     DateTime?
+  bookingId       String?   @unique
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  user            User      @relation(fields: [userId], references: [id])
+  booking         Booking?  @relation(fields: [bookingId], references: [id])
 
   @@index([razorpayOrderId])
   @@index([userId])
@@ -238,89 +240,92 @@ model BookingIntent {
 }
 
 model Booking {
-  id                   String              @id @default(cuid())
-  bookingCode          String              @unique
-  userId               String
-  scheduledDate        DateTime
-  scheduledSlot        String
-  totalPaid            Float
-  status               BookingStatus       @default(PENDING)
-  addressId            String
-  branchId             String?
-  patientName          String
-  patientAge           Int?
-  patientGender        String?
-  patientMobile        String?
-  paymentId            String?
-  razorpayOrderId      String?
-  paymentLinkId        String?
-  paymentLinkUrl       String?
-  paymentStatus        PaymentStatus       @default(PENDING)
-  collectionMode       CollectionMode      @default(HOME)
-  paymentMode          PaymentMode?
-  paymentReceivedAt    DateTime?
-  paymentReceivedById  String?
-assignedExecutiveId  String?
-  assignedPartnerId    String?
-  partnerAssignedAt    DateTime?
-  partnerAcceptedAt    DateTime?
-  collectionStartedAt  DateTime?
-  sampleCollectedAt    DateTime?
-  deliveredToLabAt     DateTime?
-partnerNote          String?
-  collectionOtp        String?
-  otpVerified          Boolean             @default(false)
-  rejectionReason      String?
-  labReviewedAt        DateTime?
-  labReviewedById      String?
-  createdAt            DateTime            @default(now())
-  user                 User                @relation(fields: [userId], references: [id])
-  branch               Branch?             @relation(fields: [branchId], references: [id])
-  packages             BookingPackage[]
-  tests                BookingTest[]
-  report               Report?
-  paymentReceivedBy    User?               @relation("PaymentReceiver", fields: [paymentReceivedById], references: [id])
-  assignedExecutive    User?               @relation("AssignedExecutive", fields: [assignedExecutiveId], references: [id])
-  assignedPartner      PathologyPartner?   @relation("AssignedPartner", fields: [assignedPartnerId], references: [id])
-statusTimeline       BookingStatusLog[]
-  rejections           BookingRejection[]
-  prescriptions        Prescription[]
-sample               Sample?
-sampleDelivery       SampleDelivery?
-  payment              Payment?            @relation("BookingPayment")
-  bookingIntent        BookingIntent?
-  partnerRating        PartnerRating?
-  referringDoctorId    String?
-  referringDoctor      Doctor?             @relation("ReferringDoctor", fields: [referringDoctorId], references: [id])
-  referralCommission   Float?              @default(0)
-  commissions          ReferralCommission[]
+  id                  String                     @id @default(cuid())
+  bookingCode         String                     @unique
+  userId              String
+  scheduledDate       DateTime
+  scheduledSlot       String
+  totalPaid           Float
+  status              BookingStatus              @default(PENDING)
+  addressId           String
+  branchId            String?
+  patientName         String
+  patientAge          Int?
+  patientGender       String?
+  patientMobile       String?
+  paymentId           String?
+  razorpayOrderId     String?
+  paymentLinkId       String?
+  paymentLinkUrl      String?
+  paymentStatus       PaymentStatus              @default(PENDING)
+  collectionMode      CollectionMode             @default(HOME)
+  paymentMode         PaymentMode?
+  paymentReceivedAt   DateTime?
+  paymentReceivedById String?
+  assignedExecutiveId String?
+  assignedPartnerId   String?
+  partnerAssignedAt   DateTime?
+  partnerAcceptedAt   DateTime?
+  collectionStartedAt DateTime?
+  sampleCollectedAt   DateTime?
+  deliveredToLabAt    DateTime?
+  partnerNote         String?
+  collectionOtp       String?
+  otpVerified         Boolean                    @default(false)
+  rejectionReason     String?
+  labReviewedAt       DateTime?
+  labReviewedById     String?
+  createdAt           DateTime                   @default(now())
+  user                User                       @relation(fields: [userId], references: [id])
+  branch              Branch?                    @relation(fields: [branchId], references: [id])
+  packages            BookingPackage[]
+  tests               BookingTest[]
+  report              Report?
+  paymentReceivedBy   User?                      @relation("PaymentReceiver", fields: [paymentReceivedById], references: [id])
+  assignedExecutive   User?                      @relation("AssignedExecutive", fields: [assignedExecutiveId], references: [id])
+  assignedPartner     PathologyPartner?          @relation("AssignedPartner", fields: [assignedPartnerId], references: [id])
+  statusTimeline      BookingStatusLog[]
+  rejections          BookingRejection[]
+  prescriptions       Prescription[]
+  sample              Sample?
+  sampleDelivery      SampleDelivery?
+  payment             Payment?                   @relation("BookingPayment")
+  bookingIntent       BookingIntent?
+  partnerRating       PartnerRating?
+  referringDoctorId   String?
+  referringDoctor     Doctor?                    @relation("ReferringDoctor", fields: [referringDoctorId], references: [id])
+  referralCommission  Float?                     @default(0)
+  commissions         ReferralCommission[]
+  partnerTransactions PartnerWalletTransaction[]
 }
+
 model Branch {
-  id                  String    @id @default(uuid())
-  name                String
-  code                String    @unique
-  line1               String
-  city                String
-  state               String
-  pincode             String
-  latitude            Float?
-  longitude           Float?
-  contactNumber       String?
-  email               String?
-  labRegNo            String?
-  workingHours        String?
-  availableSlots      Json?
-  homeCollection      Boolean   @default(true)
-  labVisit            Boolean   @default(true)
-  isActive            Boolean   @default(true)
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
-bookings            Booking[]
-  reports             Report[]  @relation("ReportBranch")
-  sampleDeliveries    SampleDelivery[] @relation("DeliveryBranch")
-  doctors             Doctor[]
-  adminUsers          AdminUser[]
+  id               String           @id @default(uuid())
+  name             String
+  code             String           @unique
+  line1            String
+  city             String
+  state            String
+  pincode          String
+  latitude         Float?
+  longitude        Float?
+  contactNumber    String?
+  email            String?
+  labRegNo         String?
+  workingHours     String?
+  availableSlots   Json?
+  homeCollection   Boolean          @default(true)
+  labVisit         Boolean          @default(true)
+  isActive         Boolean          @default(true)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  bookings         Booking[]
+  reports          Report[]         @relation("ReportBranch")
+  sampleDeliveries SampleDelivery[] @relation("DeliveryBranch")
+  doctors          Doctor[]
+  adminUsers       AdminUser[]
 }
+
 model BookingTest {
   bookingId String
   testId    String
@@ -338,42 +343,44 @@ model BookingPackage {
 
   @@id([bookingId, packageId])
 }
+
 model Report {
-  id                   String           @id @default(uuid())
-  bookingId            String           @unique
-  testName             String
-  reportedDate         DateTime         @default(now())
-  status               ReportStatus     @default(DRAFT)
-  clinicalNotes        String?
-  technicianRemarks    String?
-  doctorRemarks        String?
-  internalNotes        String?
-  hasAbnormalFlags     Boolean          @default(false)
-  verifiedById         String?
-  verifiedAt           DateTime?
-  recipientType        String?
-  recipientId          String?
-  pdfUrl               String?
-  pdfPublicId          String?
-  pdfUploadedAt        DateTime?
-  reportBranchId       String?
-  doctorName           String?
-  doctorQualification  String?
-  doctorRegNo          String?
-  doctorDesignation    String?
-  doctorVerifiedAt     DateTime?
-  doctorSignatureUrl   String?
-  technicianName       String?
+  id                      String           @id @default(uuid())
+  bookingId               String           @unique
+  testName                String
+  reportedDate            DateTime         @default(now())
+  status                  ReportStatus     @default(DRAFT)
+  clinicalNotes           String?
+  technicianRemarks       String?
+  doctorRemarks           String?
+  internalNotes           String?
+  hasAbnormalFlags        Boolean          @default(false)
+  verifiedById            String?
+  verifiedAt              DateTime?
+  recipientType           String?
+  recipientId             String?
+  pdfUrl                  String?
+  pdfPublicId             String?
+  pdfUploadedAt           DateTime?
+  reportBranchId          String?
+  doctorName              String?
+  doctorQualification     String?
+  doctorRegNo             String?
+  doctorDesignation       String?
+  doctorVerifiedAt        DateTime?
+  doctorSignatureUrl      String?
+  technicianName          String?
   technicianQualification String?
-  technicianSignatureUrl String?
-  booking              Booking          @relation(fields: [bookingId], references: [id])
-  verifiedBy           User?            @relation("ReportVerifier", fields: [verifiedById], references: [id])
-  reportBranch         Branch?          @relation("ReportBranch", fields: [reportBranchId], references: [id])
-  parameters           ReportResult[]
-  auditLogs            ReportAuditLog[]
+  technicianSignatureUrl  String?
+  booking                 Booking          @relation(fields: [bookingId], references: [id])
+  verifiedBy              User?            @relation("ReportVerifier", fields: [verifiedById], references: [id])
+  reportBranch            Branch?          @relation("ReportBranch", fields: [reportBranchId], references: [id])
+  parameters              ReportResult[]
+  auditLogs               ReportAuditLog[]
 
   @@index([reportedDate])
 }
+
 model ReportResult {
   id             String         @id @default(uuid())
   reportId       String
@@ -398,6 +405,7 @@ enum Role {
   PATHOLOGY_PARTNER
   DOCTOR
 }
+
 model AdminRole {
   id          String           @id @default(uuid())
   name        String           @unique
@@ -431,56 +439,57 @@ model RolePermission {
 }
 
 model AdminUser {
-  id                  String              @id @default(uuid())
-  userId              String              @unique
-  roleId              String
-  franchiseId         String?
-  department          String?
-  designation         String?
-  qualification       String?
-  registrationNo      String?
-  signatureUrl        String?
-  branchId            String?
-  partnerId           String?
-  userType            String?             @default("STAFF")
-  isActive            Boolean             @default(true)
-  createdAt           DateTime            @default(now())
-  user                User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  role                AdminRole           @relation(fields: [roleId], references: [id])
-  branch              Branch?             @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  assignedChats       Conversation[]
-  supportAssignments   SupportAssignment[]
+  id                 String              @id @default(uuid())
+  userId             String              @unique
+  roleId             String
+  franchiseId        String?
+  department         String?
+  designation        String?
+  qualification      String?
+  registrationNo     String?
+  signatureUrl       String?
+  branchId           String?
+  partnerId          String?
+  userType           String?             @default("STAFF")
+  isActive           Boolean             @default(true)
+  createdAt          DateTime            @default(now())
+  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role               AdminRole           @relation(fields: [roleId], references: [id])
+  branch             Branch?             @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  assignedChats      Conversation[]
+  supportAssignments SupportAssignment[]
 }
 
 model Doctor {
-  id              String    @id @default(uuid())
-  userId          String?   @unique
-  name            String
-  code            String?   @unique
-  loginId         String?   @unique
-  password        String?
-  qualification   String
-  registrationNo  String
-  specialization  String?   @default("Pathology")
-  designation     String    @default("Senior Pathologist")
-  photoUrl        String?
-  signatureUrl    String?
-  branchId        String?
-  cityId          String?
-  partnerId       String?
-  doctorType      DoctorType @default(EMPLOYEE)
-  commissionRate  Float     @default(30.0)
-  paymentCycle    String    @default("MONTHLY")
-  approvalStatus  PartnerApprovalStatus @default(PENDING)
-  rejectionReason String?
-  isActive        Boolean   @default(false)
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  user            User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
-  branch          Branch?   @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  commissions     ReferralCommission[]
-  referredBookings Booking[] @relation("ReferringDoctor")
+  id               String                @id @default(uuid())
+  userId           String?               @unique
+  name             String
+  code             String?               @unique
+  loginId          String?               @unique
+  password         String?
+  qualification    String
+  registrationNo   String
+  specialization   String?               @default("Pathology")
+  designation      String                @default("Senior Pathologist")
+  photoUrl         String?
+  signatureUrl     String?
+  branchId         String?
+  cityId           String?
+  partnerId        String?
+  doctorType       DoctorType            @default(EMPLOYEE)
+  commissionRate   Float                 @default(30.0)
+  paymentCycle     String                @default("MONTHLY")
+  approvalStatus   PartnerApprovalStatus @default(PENDING)
+  rejectionReason  String?
+  isActive         Boolean               @default(false)
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+  user             User?                 @relation(fields: [userId], references: [id], onDelete: SetNull)
+  branch           Branch?               @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  commissions      ReferralCommission[]
+  referredBookings Booking[]             @relation("ReferringDoctor")
 }
+
 model AuditLog {
   id              String   @id @default(uuid())
   userId          String
@@ -538,6 +547,7 @@ enum PaymentMode {
   QR_CODE
   CARD
 }
+
 enum PaymentStatus {
   PENDING
   SUCCESS
@@ -593,13 +603,13 @@ enum DoctorType {
 }
 
 model ReportAuditLog {
-  id         String   @id @default(uuid())
-  reportId   String
-  action     String
+  id          String   @id @default(uuid())
+  reportId    String
+  action      String
   performedBy String
-  details    String?
-  createdAt  DateTime @default(now())
-  report     Report   @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  details     String?
+  createdAt   DateTime @default(now())
+  report      Report   @relation(fields: [reportId], references: [id], onDelete: Cascade)
 }
 
 model Offer {
@@ -618,13 +628,13 @@ model Offer {
 }
 
 model PathologyPartner {
-  id                   String                @id @default(uuid())
-  userId               String                @unique
+  id                   String                     @id @default(uuid())
+  userId               String                     @unique
   labName              String
   ownerName            String?
   role                 String
-  partnerCode          String?               @unique
-  loginId              String?               @unique
+  partnerCode          String?                    @unique
+  loginId              String?                    @unique
   password             String?
   cityId               String?
   city                 String?
@@ -635,49 +645,68 @@ model PathologyPartner {
   preferredServiceArea String?
   latitude             Float?
   longitude            Float?
-  commissionRate       Float                 @default(30.0)
-  paymentCycle         String                @default("MONTHLY")
-  approvalStatus       PartnerApprovalStatus @default(PENDING)
+  commissionRate       Float                      @default(30.0)
+  paymentCycle         String                     @default("MONTHLY")
+  approvalStatus       PartnerApprovalStatus      @default(PENDING)
   rejectionReason      String?
   correctionReason     String?
-  isAvailable          Boolean               @default(false)
+  isAvailable          Boolean                    @default(false)
   availability         Json?
-  rating               Float                 @default(0)
-  totalCollections     Int                   @default(0)
-  totalRatings         Int                   @default(0)
-  createdAt            DateTime              @default(now())
-  updatedAt            DateTime              @updatedAt
-  user                 User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
-  bookings             Booking[]             @relation("AssignedPartner")
+  walletBalance        Float                      @default(0)
+  rating               Float                      @default(0)
+  totalCollections     Int                        @default(0)
+  totalRatings         Int                        @default(0)
+  createdAt            DateTime                   @default(now())
+  updatedAt            DateTime                   @updatedAt
+  user                 User                       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bookings             Booking[]                  @relation("AssignedPartner")
   sampleDeliveries     SampleDelivery[]
   ratings              PartnerRating[]
   commissions          ReferralCommission[]
+  walletTransactions   PartnerWalletTransaction[]
   documents            PartnerDocument[]
 }
 
+model PartnerWalletTransaction {
+  id          String   @id @default(uuid())
+  partnerId   String
+  amount      Float
+  type        String // 'CREDIT_COMMISSION', 'DEBIT_CASH_COLLECTION', 'PAYOUT_SETTLEMENT'
+  description String?
+  bookingId   String?
+  createdAt   DateTime @default(now())
+
+  partner PathologyPartner @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  booking Booking?         @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+
+  @@index([partnerId])
+  @@index([createdAt])
+  @@index([bookingId])
+}
+
 model ReferralCommission {
-  id               String            @id @default(uuid())
+  id               String    @id @default(uuid())
   bookingId        String
-  entityType       String            // 'DOCTOR' | 'PARTNER'
+  entityType       String // 'DOCTOR' | 'PARTNER'
   doctorId         String?
   partnerId        String?
   bookingCode      String
   patientName      String
   testName         String
   testAmount       Float
-  commissionRate   Float             @default(30.0)
+  commissionRate   Float     @default(30.0)
   commissionAmount Float
-  paymentCycle     String            @default("MONTHLY") // 'WEEKLY' | '15_DAYS' | '30_DAYS'
-  status           String            @default("UNPAID")  // 'UNPAID' | 'PAID'
+  paymentCycle     String    @default("MONTHLY") // 'WEEKLY' | '15_DAYS' | '30_DAYS'
+  status           String    @default("UNPAID") // 'UNPAID' | 'PAID'
   paidAt           DateTime?
   paidBy           String?
   notes            String?
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
-  doctor           Doctor?           @relation(fields: [doctorId], references: [id], onDelete: SetNull)
-  partner          PathologyPartner? @relation(fields: [partnerId], references: [id], onDelete: SetNull)
-  booking          Booking           @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  doctor  Doctor?           @relation(fields: [doctorId], references: [id], onDelete: SetNull)
+  partner PathologyPartner? @relation(fields: [partnerId], references: [id], onDelete: SetNull)
+  booking Booking           @relation(fields: [bookingId], references: [id], onDelete: Cascade)
 
   @@index([doctorId])
   @@index([partnerId])
@@ -739,17 +768,17 @@ model PartnerDocument {
 }
 
 model PartnerRating {
-  id          String           @id @default(uuid())
-  bookingId   String           @unique
-  partnerId   String
-  userId      String
-  rating      Int
-  review      String?
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
-  booking     Booking          @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-  partner     PathologyPartner @relation(fields: [partnerId], references: [id], onDelete: Cascade)
-  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id        String           @id @default(uuid())
+  bookingId String           @unique
+  partnerId String
+  userId    String
+  rating    Int
+  review    String?
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  booking   Booking          @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  partner   PathologyPartner @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([partnerId])
   @@index([userId])
@@ -796,31 +825,31 @@ enum PrescriptionStatus {
 }
 
 model Conversation {
-  id           String             @id @default(uuid())
+  id           String              @id @default(uuid())
   userId       String
-  status       ConversationStatus @default(AI_ACTIVE)
+  status       ConversationStatus  @default(AI_ACTIVE)
   assignedToId String?
-  createdAt    DateTime           @default(now())
-  updatedAt    DateTime           @updatedAt
-  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  assignedTo   AdminUser?         @relation(fields: [assignedToId], references: [id])
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assignedTo   AdminUser?          @relation(fields: [assignedToId], references: [id])
   messages     ChatMessage[]
   assignments  SupportAssignment[]
 }
 
 model ChatMessage {
-  id             String        @id @default(uuid())
+  id             String       @id @default(uuid())
   conversationId String
   senderType     SenderType
   senderId       String
   text           String?
   attachmentUrl  String?
   attachmentType String?
-  isRead         Boolean       @default(false)
+  isRead         Boolean      @default(false)
   deliveredAt    DateTime?
   readAt         DateTime?
-  createdAt      DateTime      @default(now())
-  conversation   Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
   @@index([conversationId])
   @@index([createdAt])
@@ -850,17 +879,17 @@ enum SenderType {
 }
 
 model SampleDelivery {
-  id              String           @id @default(uuid())
-  bookingId       String           @unique
-  partnerId       String
-  branchId        String
-  selectedAt      DateTime         @default(now())
+  id                String               @id @default(uuid())
+  bookingId         String               @unique
+  partnerId         String
+  branchId          String
+  selectedAt        DateTime             @default(now())
   deliveryStartedAt DateTime?
-  deliveredAt     DateTime?
-  status          SampleDeliveryStatus @default(SELECTED)
-  booking         Booking          @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-  partner         PathologyPartner @relation(fields: [partnerId], references: [id])
-  branch          Branch           @relation("DeliveryBranch", fields: [branchId], references: [id])
+  deliveredAt       DateTime?
+  status            SampleDeliveryStatus @default(SELECTED)
+  booking           Booking              @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  partner           PathologyPartner     @relation(fields: [partnerId], references: [id])
+  branch            Branch               @relation("DeliveryBranch", fields: [branchId], references: [id])
 
   @@index([bookingId])
   @@index([partnerId])
@@ -874,19 +903,19 @@ enum SampleDeliveryStatus {
 }
 
 model Sample {
-  id              String        @id @default(uuid())
-  bookingId       String        @unique
-  accessionNumber String        @unique
-  sampleType      String
-  condition       SampleCondition @default(GOOD)
-  receivedAt      DateTime      @default(now())
-  receivedById    String
-  rejectionReason String?
-  notes           String?
-  status          SampleStatus  @default(RECEIVED)
+  id                  String          @id @default(uuid())
+  bookingId           String          @unique
+  accessionNumber     String          @unique
+  sampleType          String
+  condition           SampleCondition @default(GOOD)
+  receivedAt          DateTime        @default(now())
+  receivedById        String
+  rejectionReason     String?
+  notes               String?
+  status              SampleStatus    @default(RECEIVED)
   processingStartedAt DateTime?
-  branchId        String?
-  booking         Booking       @relation(fields: [bookingId], references: [id])
+  branchId            String?
+  booking             Booking         @relation(fields: [bookingId], references: [id])
 
   @@index([status])
   @@index([bookingId])
@@ -908,34 +937,34 @@ enum SampleStatus {
 }
 
 model Coupon {
-  id                    String    @id @default(uuid())
-  code                  String    @unique
-  name                  String?
-  description           String?
-  discountType          String    @default("PERCENTAGE")
-  discountValue         Float
-  minOrderAmount        Float     @default(0)
-  maxDiscount           Float?
-  usageLimit            Int?
-  perUserLimit          Int       @default(1)
-  usedCount             Int       @default(0)
-  expiresAt             DateTime?
-  startsAt              DateTime?
-  isActive              Boolean   @default(true)
-  isFirstOrderOnly      Boolean   @default(false)
-  applicableUserType    String?
-  applicablePaymentMode String?
+  id                       String             @id @default(uuid())
+  code                     String             @unique
+  name                     String?
+  description              String?
+  discountType             String             @default("PERCENTAGE")
+  discountValue            Float
+  minOrderAmount           Float              @default(0)
+  maxDiscount              Float?
+  usageLimit               Int?
+  perUserLimit             Int                @default(1)
+  usedCount                Int                @default(0)
+  expiresAt                DateTime?
+  startsAt                 DateTime?
+  isActive                 Boolean            @default(true)
+  isFirstOrderOnly         Boolean            @default(false)
+  applicableUserType       String?
+  applicablePaymentMode    String?
   applicableCollectionMode String?
-  applicableCityIds     String[]  @default([])
-  applicableBranchIds   String[]  @default([])
-  applicableTestIds     String[]  @default([])
-  applicablePackageIds  String[]  @default([])
-  createdById           String?
-  updatedById           String?
-  createdAt             DateTime  @default(now())
-  updatedAt             DateTime  @updatedAt
-  redemptions           CouponRedemption[]
-  auditLogs             CouponAuditLog[]
+  applicableCityIds        String[]           @default([])
+  applicableBranchIds      String[]           @default([])
+  applicableTestIds        String[]           @default([])
+  applicablePackageIds     String[]           @default([])
+  createdById              String?
+  updatedById              String?
+  createdAt                DateTime           @default(now())
+  updatedAt                DateTime           @updatedAt
+  redemptions              CouponRedemption[]
+  auditLogs                CouponAuditLog[]
 }
 
 model CouponRedemption {
@@ -958,7 +987,7 @@ model CouponAuditLog {
   couponCode      String
   action          String
   performedById   String?
-  performedByRole String? 
+  performedByRole String?
   ipAddress       String?
   details         Json?
   createdAt       DateTime @default(now())
@@ -967,48 +996,49 @@ model CouponAuditLog {
   @@index([couponId])
   @@index([action])
 }
+
 model Payment {
-  id                  String          @id @default(uuid())
-  bookingId           String          @unique
-  razorpayOrderId     String?         @unique
-  razorpayPaymentId   String?         @unique
-  razorpaySignature   String?
-  amount              Float
-  subtotal            Float           @default(0)
-  discount            Float           @default(0)
-  couponDiscount      Float           @default(0)
-  collectionCharge    Float           @default(0)
-  gst                 Float           @default(0)
-  platformFee         Float           @default(0)
-  couponCode          String?
-  couponId            String?
-  tax                 Float           @default(0)
-  currency            String          @default("INR")
-  method              String?
-  gateway             String          @default("RAZORPAY")
-  status              PaymentTxStatus @default(PENDING)
-  invoiceNumber       String?         @unique
-  receiptNumber       String?         @unique
-  invoiceUrl          String?
-  invoicePublicId     String?
-  invoiceGeneratedAt  DateTime?
-  receiptUrl          String?
-  receiptPublicId     String?
-  receiptGeneratedAt  DateTime?
-  paymentReference    String?
-  collectedById       String?
-  branchId            String?
-  paidAt              DateTime?
-  failureReason       String?
-  webhookVerified     Boolean         @default(false)
-  idempotencyKey      String?         @unique
-  metadata            Json?
-  createdAt           DateTime        @default(now())
-  updatedAt           DateTime        @updatedAt
-  booking             Booking         @relation("BookingPayment", fields: [bookingId], references: [id])
-  refunds             Refund[]
-  attempts            PaymentAttempt[]
-  financeAuditLogs    FinanceAuditLog[]
+  id                 String            @id @default(uuid())
+  bookingId          String            @unique
+  razorpayOrderId    String?           @unique
+  razorpayPaymentId  String?           @unique
+  razorpaySignature  String?
+  amount             Float
+  subtotal           Float             @default(0)
+  discount           Float             @default(0)
+  couponDiscount     Float             @default(0)
+  collectionCharge   Float             @default(0)
+  gst                Float             @default(0)
+  platformFee        Float             @default(0)
+  couponCode         String?
+  couponId           String?
+  tax                Float             @default(0)
+  currency           String            @default("INR")
+  method             String?
+  gateway            String            @default("RAZORPAY")
+  status             PaymentTxStatus   @default(PENDING)
+  invoiceNumber      String?           @unique
+  receiptNumber      String?           @unique
+  invoiceUrl         String?
+  invoicePublicId    String?
+  invoiceGeneratedAt DateTime?
+  receiptUrl         String?
+  receiptPublicId    String?
+  receiptGeneratedAt DateTime?
+  paymentReference   String?
+  collectedById      String?
+  branchId           String?
+  paidAt             DateTime?
+  failureReason      String?
+  webhookVerified    Boolean           @default(false)
+  idempotencyKey     String?           @unique
+  metadata           Json?
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  booking            Booking           @relation("BookingPayment", fields: [bookingId], references: [id])
+  refunds            Refund[]
+  attempts           PaymentAttempt[]
+  financeAuditLogs   FinanceAuditLog[]
 
   @@index([status])
   @@index([paidAt])
@@ -1016,7 +1046,6 @@ model Payment {
   @@index([razorpayPaymentId])
   @@index([createdAt])
 }
-
 
 model PaymentAttempt {
   id                String   @id @default(uuid())
@@ -1035,17 +1064,16 @@ model PaymentAttempt {
   @@index([createdAt])
 }
 
-
 model WebhookEvent {
-  id            String   @id @default(uuid())
-  eventId       String   @unique
-  event         String
+  id              String    @id @default(uuid())
+  eventId         String    @unique
+  event           String
   razorpayOrderId String?
-  payload       Json
-  processed     Boolean  @default(false)
-  processedAt   DateTime?
-  error         String?
-  createdAt     DateTime @default(now())
+  payload         Json
+  processed       Boolean   @default(false)
+  processedAt     DateTime?
+  error           String?
+  createdAt       DateTime  @default(now())
 
   @@index([eventId])
   @@index([event])
@@ -1073,57 +1101,57 @@ model PricingSnapshot {
   @@index([bookingId])
 }
 
-
 model InvoiceSequence {
-  id        String @id @default("singleton")
-  lastInvoiceSeq Int @default(0)
-  lastReceiptSeq Int @default(0)
-  updatedAt DateTime @updatedAt
+  id             String   @id @default("singleton")
+  lastInvoiceSeq Int      @default(0)
+  lastReceiptSeq Int      @default(0)
+  updatedAt      DateTime @updatedAt
 }
+
 model Refund {
-  id                  String        @id @default(uuid())
-  paymentId           String
-  bookingId           String
-  razorpayRefundId    String?       @unique
-  amount              Float
-  reason              String
-  approvalNotes       String?
-  status              RefundStatus  @default(PENDING)
-  requestedById       String?
-  approvedById        String?
-  processedAt         DateTime?
-  gatewayResponse     Json?
-  createdAt           DateTime      @default(now())
-  updatedAt           DateTime      @updatedAt
-  payment             Payment       @relation(fields: [paymentId], references: [id])
-  financeAuditLogs    FinanceAuditLog[]
+  id               String            @id @default(uuid())
+  paymentId        String
+  bookingId        String
+  razorpayRefundId String?           @unique
+  amount           Float
+  reason           String
+  approvalNotes    String?
+  status           RefundStatus      @default(PENDING)
+  requestedById    String?
+  approvedById     String?
+  processedAt      DateTime?
+  gatewayResponse  Json?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  payment          Payment           @relation(fields: [paymentId], references: [id])
+  financeAuditLogs FinanceAuditLog[]
 
   @@index([status])
   @@index([bookingId])
 }
 
 model Settlement {
-  id                  String            @id @default(uuid())
-  settlementRef       String            @unique @default(cuid())
-  franchiseId         String?
-  franchiseName       String
-  period              String
-  periodStart         DateTime
-  periodEnd           DateTime
-  totalBusiness       Float
-  commissionRate      Float             @default(15)
-  commissionAmount    Float
-  deductions          Float             @default(0)
-  taxOnCommission     Float             @default(0)
-  netPayable          Float
-  status              SettlementStatus  @default(PENDING)
-  approvedById        String?
-  payoutReference     String?
-  gatewayResponse     Json?
-  processedAt         DateTime?
-  createdAt           DateTime          @default(now())
-  updatedAt           DateTime          @updatedAt
-  financeAuditLogs    FinanceAuditLog[]
+  id               String            @id @default(uuid())
+  settlementRef    String            @unique @default(cuid())
+  franchiseId      String?
+  franchiseName    String
+  period           String
+  periodStart      DateTime
+  periodEnd        DateTime
+  totalBusiness    Float
+  commissionRate   Float             @default(15)
+  commissionAmount Float
+  deductions       Float             @default(0)
+  taxOnCommission  Float             @default(0)
+  netPayable       Float
+  status           SettlementStatus  @default(PENDING)
+  approvedById     String?
+  payoutReference  String?
+  gatewayResponse  Json?
+  processedAt      DateTime?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  financeAuditLogs FinanceAuditLog[]
 
   @@index([status])
   @@index([periodStart])
@@ -1177,44 +1205,44 @@ enum SettlementStatus {
 }
 
 model Supplier {
-  id            String      @id @default(uuid())
-  name          String
-  contactPerson String?
-  phone         String?
-  email         String?
-  gstNumber     String?
-  address       String?
-  isActive      Boolean     @default(true)
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
+  id             String          @id @default(uuid())
+  name           String
+  contactPerson  String?
+  phone          String?
+  email          String?
+  gstNumber      String?
+  address        String?
+  isActive       Boolean         @default(true)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
   inventoryItems InventoryItem[]
   purchaseOrders PurchaseOrder[]
 }
 
 model InventoryItem {
-  id               String      @id @default(uuid())
-  sku              String      @unique
-  name             String
-  category         String
-  itemType         InventoryItemType @default(REAGENT)
-  supplierId       String?
-  manufacturer     String?
-  unit             String
-  currentStock     Float       @default(0)
-  minThreshold     Float       @default(0)
-  maxCapacity      Float?
-  batchNumber      String?
-  lotNumber        String?
-  manufacturingDate DateTime?
-  expiryDate       DateTime?
-  purchaseCost     Float?
-  branchId         String?
-  isActive         Boolean     @default(true)
-  createdAt        DateTime    @default(now())
-  updatedAt        DateTime    @updatedAt
-  supplier         Supplier?   @relation(fields: [supplierId], references: [id])
-  transactions     InventoryTransaction[]
-  consumptionRules TestConsumptionRule[]
+  id                 String                 @id @default(uuid())
+  sku                String                 @unique
+  name               String
+  category           String
+  itemType           InventoryItemType      @default(REAGENT)
+  supplierId         String?
+  manufacturer       String?
+  unit               String
+  currentStock       Float                  @default(0)
+  minThreshold       Float                  @default(0)
+  maxCapacity        Float?
+  batchNumber        String?
+  lotNumber          String?
+  manufacturingDate  DateTime?
+  expiryDate         DateTime?
+  purchaseCost       Float?
+  branchId           String?
+  isActive           Boolean                @default(true)
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+  supplier           Supplier?              @relation(fields: [supplierId], references: [id])
+  transactions       InventoryTransaction[]
+  consumptionRules   TestConsumptionRule[]
   purchaseOrderItems PurchaseOrderItem[]
 
   @@index([branchId])
@@ -1231,7 +1259,7 @@ enum InventoryItemType {
 }
 
 model InventoryTransaction {
-  id              String      @id @default(uuid())
+  id              String          @id @default(uuid())
   inventoryItemId String
   transactionType TransactionType
   quantity        Float
@@ -1242,8 +1270,8 @@ model InventoryTransaction {
   remarks         String?
   performedById   String?
   branchId        String?
-  createdAt       DateTime    @default(now())
-  inventoryItem   InventoryItem @relation(fields: [inventoryItemId], references: [id])
+  createdAt       DateTime        @default(now())
+  inventoryItem   InventoryItem   @relation(fields: [inventoryItemId], references: [id])
 
   @@index([inventoryItemId])
   @@index([transactionType])
@@ -1275,17 +1303,17 @@ model TestConsumptionRule {
 }
 
 model PurchaseOrder {
-  id               String      @id @default(uuid())
-  poNumber         String      @unique
+  id               String              @id @default(uuid())
+  poNumber         String              @unique
   supplierId       String
-  purchaseDate     DateTime    @default(now())
+  purchaseDate     DateTime            @default(now())
   expectedDelivery DateTime?
   receivedDate     DateTime?
-  status           POStatus    @default(PENDING)
+  status           POStatus            @default(PENDING)
   createdById      String?
-  createdAt        DateTime    @default(now())
-  updatedAt        DateTime    @updatedAt
-  supplier         Supplier    @relation(fields: [supplierId], references: [id])
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  supplier         Supplier            @relation(fields: [supplierId], references: [id])
   items            PurchaseOrderItem[]
 }
 
@@ -1331,16 +1359,16 @@ model CmsBanner {
 }
 
 model CmsConfig {
-  id              String   @id @default("singleton")
-  layoutSections  Json     @default("[]")
-  categoryOrder   Json     @default("[]")
-  featureFlags    Json     @default("{}")
-  maintenance     Json     @default("{}")
-  minVersion      Json     @default("{}")
-  contactInfo     Json     @default("{}")
-  socialLinks     Json     @default("{}")
-  updatedAt       DateTime @updatedAt
-  updatedById     String?
+  id             String   @id @default("singleton")
+  layoutSections Json     @default("[]")
+  categoryOrder  Json     @default("[]")
+  featureFlags   Json     @default("{}")
+  maintenance    Json     @default("{}")
+  minVersion     Json     @default("{}")
+  contactInfo    Json     @default("{}")
+  socialLinks    Json     @default("{}")
+  updatedAt      DateTime @updatedAt
+  updatedById    String?
 }
 
 model CmsEmergencyAlert {
@@ -1370,23 +1398,23 @@ model CmsPage {
 }
 
 model SystemSettings {
-  id                         String   @id @default("singleton")
-  minimumHomeCollectionAmount Float    @default(0)
-  homeCollectionCharge        Float    @default(0)
-  defaultPartnerCommission    Float    @default(0)
-  labOpenTime                 String   @default("06:00")
-  labCloseTime                String   @default("22:00")
+  id                          String             @id @default("singleton")
+  minimumHomeCollectionAmount Float              @default(0)
+  homeCollectionCharge        Float              @default(0)
+  defaultPartnerCommission    Float              @default(0)
+  labOpenTime                 String             @default("06:00")
+  labCloseTime                String             @default("22:00")
   reportDeliveryMode          ReportDeliveryMode @default(AUTO_PUSH)
-  currency                    String   @default("INR")
-  timezone                    String   @default("Asia/Kolkata")
-  platformVersion             String   @default("1.0.0")
-  maintenanceMode             Boolean  @default(false)
-  allowBookings               Boolean  @default(true)
-  allowPartnerRegistration    Boolean  @default(true)
-  referralRewardAmount        Float    @default(100)
+  currency                    String             @default("INR")
+  timezone                    String             @default("Asia/Kolkata")
+  platformVersion             String             @default("1.0.0")
+  maintenanceMode             Boolean            @default(false)
+  allowBookings               Boolean            @default(true)
+  allowPartnerRegistration    Boolean            @default(true)
+  referralRewardAmount        Float              @default(100)
   updatedBy                   String?
-  updatedAt                   DateTime @updatedAt
-  createdAt                   DateTime @default(now())
+  updatedAt                   DateTime           @updatedAt
+  createdAt                   DateTime           @default(now())
 }
 
 model SupportConfig {
@@ -1419,20 +1447,20 @@ model GoogleReviewConfig {
 }
 
 model Expense {
-  id              String         @id @default(uuid())
-  title           String
-  category        String         @default("MISCELLANEOUS")
-  amount          Float
-  expenseDate     DateTime       @default(now())
-  paymentMethod   String         @default("CASH")
-  referenceNo     String?
-  receiptUrl      String?
-  notes           String?
-  vendorName      String?
-  createdById     String?
-  createdBy       User?          @relation("UserExpenses", fields: [createdById], references: [id], onDelete: SetNull)
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
+  id            String   @id @default(uuid())
+  title         String
+  category      String   @default("MISCELLANEOUS")
+  amount        Float
+  expenseDate   DateTime @default(now())
+  paymentMethod String   @default("CASH")
+  referenceNo   String?
+  receiptUrl    String?
+  notes         String?
+  vendorName    String?
+  createdById   String?
+  createdBy     User?    @relation("UserExpenses", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   @@index([category])
   @@index([expenseDate])
@@ -1457,7 +1485,7 @@ model ReferenceLab {
 }
 
 model OutsourceSample {
-  id                 String        @id @default(uuid())
+  id                 String    @id @default(uuid())
   bookingId          String?
   patientName        String
   patientAge         String?
@@ -1467,22 +1495,22 @@ model OutsourceSample {
   sampleType         String
   testNames          String
   referenceLabId     String
-  dispatchDate       DateTime      @default(now())
+  dispatchDate       DateTime  @default(now())
   expectedReportDate DateTime?
-  status             String        @default("PENDING") // PENDING, DISPATCHED, RECEIVED_BY_LAB, REPORT_RECEIVED, COMPLETED, CANCELLED
+  status             String    @default("PENDING") // PENDING, DISPATCHED, RECEIVED_BY_LAB, REPORT_RECEIVED, COMPLETED, CANCELLED
   courierTrackingNo  String?
   courierPartner     String?
-  outsourceCost      Float         @default(0)
-  paymentStatus      String        @default("UNPAID") // UNPAID, PAID
+  outsourceCost      Float     @default(0)
+  paymentStatus      String    @default("UNPAID") // UNPAID, PAID
   resultNotes        String?
   reportFileUrl      String?
   reportReceivedAt   DateTime?
   completedAt        DateTime?
   createdById        String?
-  createdAt          DateTime      @default(now())
-  updatedAt          DateTime      @updatedAt
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
-  referenceLab       ReferenceLab  @relation(fields: [referenceLabId], references: [id], onDelete: Cascade)
+  referenceLab ReferenceLab @relation(fields: [referenceLabId], references: [id], onDelete: Cascade)
 
   @@index([referenceLabId])
   @@index([status])
@@ -1495,14 +1523,14 @@ enum ReportDeliveryMode {
 }
 
 model CmsAuditLog {
-  id               String   @id @default(uuid())
-  adminId          String?
-  adminRole        String?
-  action           String
-  resource         String
-  resourceId       String?
-  details          Json?
-  createdAt        DateTime @default(now())
+  id         String   @id @default(uuid())
+  adminId    String?
+  adminRole  String?
+  action     String
+  resource   String
+  resourceId String?
+  details    Json?
+  createdAt  DateTime @default(now())
 }
 
 model DeviceToken {
@@ -1519,34 +1547,34 @@ model DeviceToken {
 }
 
 model Notification {
-  id         String             @id @default(uuid())
-  userId     String
-  title      String
-  body       String
-  type       NotificationType
-  data       Json?
-  isRead     Boolean            @default(false)
-  readAt     DateTime?
-  deepLink   String?
-  createdAt  DateTime           @default(now())
-  user       User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id        String           @id @default(uuid())
+  userId    String
+  title     String
+  body      String
+  type      NotificationType
+  data      Json?
+  isRead    Boolean          @default(false)
+  readAt    DateTime?
+  deepLink  String?
+  createdAt DateTime         @default(now())
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, isRead])
   @@index([userId, createdAt])
 }
 
 model NotificationLog {
-  id          String              @id @default(uuid())
+  id          String             @id @default(uuid())
   userId      String?
   title       String
   body        String
   type        NotificationType
-  status      NotificationStatus  @default(PENDING)
+  status      NotificationStatus @default(PENDING)
   fcmResponse Json?
   error       String?
-  retryCount  Int                 @default(0)
+  retryCount  Int                @default(0)
   sentAt      DateTime?
-  createdAt   DateTime            @default(now())
+  createdAt   DateTime           @default(now())
 
   @@index([status])
   @@index([createdAt])
@@ -1568,7 +1596,7 @@ enum NotificationType {
   REPORT_APPROVED
   PAYMENT_SUCCESS
   PAYMENT_FAILED
- NEW_BOOKING_ASSIGNED
+  NEW_BOOKING_ASSIGNED
   BOOKING_CANCELLED_BY_USER
   PATIENT_REACHED_LAB
   BOOKING_COMPLETED

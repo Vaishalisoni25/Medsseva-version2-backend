@@ -26,11 +26,11 @@ export const registerDoctor = async (req: Request, res: Response) => {
       designation: req.body?.designation,
     });
 
-    const { name, email, mobile, password, qualification, registrationNo, specialization, designation } = req.body;
+    const { name, email, mobile, qualification, registrationNo, specialization, designation } = req.body;
 
-    if (!name || !mobile || !password || !qualification || !registrationNo) {
+    if (!name || !mobile || !qualification || !registrationNo) {
       console.warn('[AUTH] Missing required fields in doctor registration');
-      return res.status(400).json({ error: 'Name, Mobile, Password, Qualification, and Registration Number are required' });
+      return res.status(400).json({ error: 'Name, Mobile, Qualification, and Registration Number are required' });
     }
 
     const cleanMobile = String(mobile || '').trim().replace(/\D/g, '').slice(-10);
@@ -55,7 +55,8 @@ export const registerDoctor = async (req: Request, res: Response) => {
     const cleanRegNo = registrationNo.trim();
     // Uniqueness check for registration number temporarily removed for app testing
 
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const randomPassword = Math.random().toString(36).slice(-10) + 'A1!';
+    const hashedPassword = await bcrypt.hash(randomPassword, 10);
     const referralCode = await generateUniqueReferralCode();
     const docCode = `DOC-${cleanMobile.slice(-4)}${Math.floor(1000 + Math.random() * 9000)}`;
 
@@ -112,13 +113,13 @@ export const registerDoctor = async (req: Request, res: Response) => {
 export const registerPartner = async (req: Request, res: Response) => {
   try {
     const {
-      name, email, mobile, password,
+      name, email, mobile,
       labName, ownerName, role: partnerRole, cityId, city, branchId, branch, state, pincode,
       address, preferredServiceArea, latitude, longitude, documents
     } = req.body;
 
-    if (!name || !mobile || !password || !labName || !partnerRole) {
-      return res.status(400).json({ error: 'name, mobile, password, labName, and role are required' });
+    if (!name || !mobile || !labName || !partnerRole) {
+      return res.status(400).json({ error: 'name, mobile, labName, and role are required' });
     }
 
     const cleanMobile = String(mobile || '').trim().replace(/\D/g, '').slice(-10);
@@ -159,7 +160,8 @@ export const registerPartner = async (req: Request, res: Response) => {
       });
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const randomPassword = Math.random().toString(36).slice(-10) + 'A1!';
+    const hashedPassword = await bcrypt.hash(randomPassword, 10);
     const referralCode = await generateUniqueReferralCode();
 
     const user = await prisma.user.create({
@@ -257,7 +259,7 @@ export const registerPartner = async (req: Request, res: Response) => {
 
 export const registerPhlebotomist = async (req: Request, res: Response) => {
   try {
-    const { name, email, mobile, password, qualification, otherDetails, experience, serviceArea, address, documents, document } = req.body;
+    const { name, email, mobile, qualification, otherDetails, experience, serviceArea, address, documents, document } = req.body;
     console.log('[AUTH] >>> POST /api/auth/register/phlebotomist received with body:', { name, mobile, email, qualification, otherDetails, docCount: Array.isArray(documents) ? documents.length : (document ? 1 : 0) });
 
     const cleanMobile = String(mobile || '').trim().replace(/\D/g, '').slice(-10);
@@ -304,7 +306,8 @@ export const registerPhlebotomist = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Government ID (Aadhaar Card or PAN Card) is required to register as Phlebotomist.' });
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const randomPassword = Math.random().toString(36).slice(-10) + 'A1!';
+    const hashedPassword = await bcrypt.hash(randomPassword, 10);
     const referralCode = await generateUniqueReferralCode();
 
     // Create Phlebotomist / Collection Partner user with EXECUTIVE role
@@ -426,14 +429,10 @@ export const registerPhlebotomist = async (req: Request, res: Response) => {
 
 export const register = async (req: Request, res: Response) => {
   try {
-    const { name, email, mobile, password, referralCode } = req.body;
+    const { name, email, mobile, referralCode } = req.body;
 
-    if (!name || !email || !mobile || !password) {
-      return res.status(400).json({ error: 'name, email, mobile, and password are required' });
-    }
-
-    if (password.length < 6) {
-      return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    if (!name || !email || !mobile) {
+      return res.status(400).json({ error: 'name, email, and mobile are required' });
     }
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -470,7 +469,8 @@ export const register = async (req: Request, res: Response) => {
       referredById = referrer.id;
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const randomPassword = Math.random().toString(36).slice(-10) + 'A1!';
+    const hashedPassword = await bcrypt.hash(randomPassword, 10);
     const otp = generateOtp();
     const otpHash = await hashOtp(otp);
     const otpExpiresAt = getOtpExpiry();
@@ -522,7 +522,7 @@ export const register = async (req: Request, res: Response) => {
         const smsResult = await sendOtpSms(cleanMobile, otp);
         console.log(`[AUTH] Registration OTP SMS dispatched to ${cleanMobile}:`, smsResult);
       } catch (smsError: any) {
-        console.warn('[AUTH] Registration SMS send warning:', smsError.message);
+        console.warn('[AUTH] Registration SMS send warning:', smsError.message, 'OTP generated:', otp);
       }
     }
 
@@ -533,15 +533,9 @@ export const register = async (req: Request, res: Response) => {
     const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '30d' });
 
     res.status(201).json({
-      message: 'Registration successful',
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        mobile: user.mobile,
-        role: user.role,
-      },
-      token,
+      message: 'Registration initiated. Please verify your mobile number.',
+      requiresMobileVerification: true,
+      mobile,
     });
   } catch (error: any) {
     console.error('Registration error:', error);

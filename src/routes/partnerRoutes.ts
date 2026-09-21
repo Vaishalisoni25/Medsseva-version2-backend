@@ -24,6 +24,9 @@ import {
   getDeliveryBranches,
   assignPartnerStaff,
   getPartnerBranchStaff,
+  getPartnerEarnings,
+  updatePayoutFrequency,
+  updateCommissionRate,
 } from '../controllers/partnerController';
 import { verifyCollectionOtp, generateCollectionOtp } from '../controllers/bookingController';
 
@@ -57,6 +60,10 @@ router.get('/ratings', getPartnerRatings);
 router.get('/delivery-branches', getDeliveryBranches);
 router.post('/bookings/:id/select-branch', selectDeliveryBranch);
 router.post('/bookings/:id/confirm-delivery', confirmBranchDelivery);
+router.get('/earnings', getPartnerEarnings);
+router.patch('/payout-frequency', updatePayoutFrequency);
+router.patch('/commission-rate', updateCommissionRate);
+
 import { documentUpload } from '../middlewares/upload';
 import {
   uploadPartnerOnboardingDocument,

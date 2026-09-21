@@ -580,9 +580,61 @@ export const collectSample = async (req: any, res: Response) => {
       return res.status(400).json({ error: 'Payment must be received before sample collection.' });
     }
 
-    const updated = await prisma.booking.update({ where: { id }, data: { status: 'SAMPLE_COLLECTED' } });
+    let updated;
+    await prisma.$transaction(async (tx) => {
+      updated = await tx.booking.update({ where: { id }, data: { status: 'SAMPLE_COLLECTED' } });
+      
+      // Process Partner Commission & Wallet
+      if (booking.collectionMode === 'HOME' && booking.assignedPartnerId) {
+        const partner = await tx.pathologyPartner.findUnique({ where: { id: booking.assignedPartnerId } });
+        if (partner && partner.role === 'FREELANCER') {
+          // If the partner is a Freelancer, we calculate commission based on their rate
+          const commissionRate = partner.commissionRate || 30.0;
+          const commissionAmount = (booking.totalPaid * commissionRate) / 100;
+          
+          if (booking.paymentMode === 'CASH') {
+            // Partner collected 100% cash. They owe (totalPaid - commissionAmount) to the company.
+            const amountOwedToCompany = booking.totalPaid - commissionAmount;
+            if (amountOwedToCompany > 0) {
+              await tx.pathologyPartner.update({
+                where: { id: partner.id },
+                data: { walletBalance: { decrement: amountOwedToCompany } }
+              });
+              await tx.partnerWalletTransaction.create({
+                data: {
+                  partnerId: partner.id,
+                  amount: -amountOwedToCompany,
+                  type: 'DEBIT_CASH_COLLECTION',
+                  description: `Cash collected for booking ${booking.bookingCode}. Deducted lab share.`,
+                  bookingId: booking.id,
+                }
+              });
+            }
+          } else {
+            // Patient paid online. Partner earned commissionAmount.
+            if (commissionAmount > 0) {
+              await tx.pathologyPartner.update({
+                where: { id: partner.id },
+                data: { walletBalance: { increment: commissionAmount } }
+              });
+              await tx.partnerWalletTransaction.create({
+                data: {
+                  partnerId: partner.id,
+                  amount: commissionAmount,
+                  type: 'CREDIT_COMMISSION',
+                  description: `Commission earned for online booking ${booking.bookingCode}.`,
+                  bookingId: booking.id,
+                }
+              });
+            }
+          }
+        }
+      }
+
+      await tx.bookingStatusLog.create({ data: { bookingId: id, status: 'SAMPLE_COLLECTED', note: 'Sample collected', updatedBy: actorId } });
+    });
+
     sendNotificationToUser(booking.userId, 'Sample Collected', 'Your sample has been collected.', 'SAMPLE_COLLECTED', { bookingId: id }).catch(console.error);
-    await prisma.bookingStatusLog.create({ data: { bookingId: id, status: 'SAMPLE_COLLECTED', note: 'Sample collected', updatedBy: actorId } });
     res.json(updated);
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to mark sample collected' });

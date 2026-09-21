@@ -344,6 +344,41 @@ export const updateDoctor = async (req: AuthRequest, res: Response) => {
   }
 };
 
+// Update own profile for Doctor portal
+export const updateDoctorProfileSelf = async (req: any, res: Response) => {
+  try {
+    const userId = req.user.id;
+    const { commissionRate, paymentCycle, designation, qualification, specialization } = req.body;
+
+    const doctor = await prisma.doctor.findFirst({
+      where: {
+        OR: [{ userId }, { id: userId }],
+      },
+    });
+
+    if (!doctor) {
+      return res.status(404).json({ error: 'Doctor profile not found' });
+    }
+
+    const dataToUpdate: any = {};
+    if (commissionRate !== undefined) dataToUpdate.commissionRate = Number(commissionRate);
+    if (paymentCycle) dataToUpdate.paymentCycle = paymentCycle;
+    if (designation !== undefined) dataToUpdate.designation = designation;
+    if (qualification !== undefined) dataToUpdate.qualification = qualification;
+    if (specialization !== undefined) dataToUpdate.specialization = specialization;
+
+    const updated = await prisma.doctor.update({
+      where: { id: doctor.id },
+      data: dataToUpdate,
+    });
+
+    res.json({ success: true, doctor: updated });
+  } catch (error) {
+    console.error('Error updating doctor profile (self):', error);
+    res.status(500).json({ error: 'Failed to update profile' });
+  }
+};
+
 export const deleteDoctor = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
