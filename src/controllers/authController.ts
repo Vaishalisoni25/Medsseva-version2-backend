@@ -11,6 +11,7 @@ import {
 } from '../services/otp.service';
 import { generateUniqueReferralCode } from '../utils/referral.utils';
 import { triggerApprovalNotification } from '../services/notification.service';
+import { firebaseAuth } from '../lib/firebaseAdmin';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-medsseva-key';
 
@@ -1559,19 +1560,13 @@ export const sendOtp = async (req: Request, res: Response) => {
       });
     }
 
-    // 5. Trigger Brevo Transactional SMS to registered mobile number
-    const smsResult = await sendOtpSms(cleanMobile, otp);
-    console.log(`\n======================================================`);
-    console.log(`[OTP DISPATCH] Mobile: ${cleanMobile} | OTP: ${otp}`);
-    console.log(`[BREVO SMS STATUS] ${smsResult.sent ? 'SUCCESS' : 'FAILED: ' + (smsResult.error || 'Check Brevo SMS addon credits')}`);
-    console.log(`======================================================\n`);
+    // 5. Brevo SMS OTP disabled - Firebase Phone Authentication delivers OTP directly to device
+    console.log(`[AUTH] Mobile ${cleanMobile} verified for Firebase Phone Auth login`);
 
     return res.json({
       success: true,
-      message: smsResult.sent
-        ? 'Verification code sent to your mobile number via SMS'
-        : 'OTP generated. SMS delivery initiated.',
-      smsSent: smsResult.sent,
+      message: 'Mobile number verified. Proceed with Firebase Phone OTP.',
+      smsSent: true,
     });
   } catch (error: any) {
     console.error('[AUTH] sendOtp error:', error);
@@ -1650,8 +1645,154 @@ export const verifyOtp = async (req: Request, res: Response) => {
   }
 };
 
+export const loginWithFirebaseToken = async (req: Request, res: Response) => {
+  try {
+    const { idToken, expectedRole } = req.body;
+    if (!idToken) {
+      return res.status(400).json({ error: 'Firebase ID token is required' });
+    }
+
+    if (!firebaseAuth) {
+      return res.status(500).json({ error: 'Firebase Auth is not initialized on the server.' });
+    }
+
+    let decodedToken;
+    try {
+      decodedToken = await firebaseAuth.verifyIdToken(idToken);
+    } catch (err: any) {
+      console.error('[AUTH] Firebase verifyIdToken error:', err.message);
+      return res.status(401).json({
+        error: 'Invalid or expired Firebase verification token. Please request a new OTP.',
+        details: err.message,
+      });
+    }
+
+    const verifiedPhone = decodedToken.phone_number;
+    if (!verifiedPhone) {
+      return res.status(400).json({ error: 'Firebase token does not contain a verified phone number.' });
+    }
+
+    // Normalize phone number (last 10 digits for Indian numbers)
+    const cleanMobile = verifiedPhone.replace(/\D/g, '').slice(-10);
+
+    const user = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { mobile: cleanMobile },
+          { mobile: verifiedPhone },
+          { mobile: `+91${cleanMobile}` }
+        ]
+      }
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        error: 'This mobile number is not registered. Please register first.',
+        unregistered: true,
+        phone: cleanMobile,
+      });
+    }
+
+    if (user.isActive === false) {
+      return res.status(403).json({
+        error: 'Your account has been deactivated. Please contact LMS Administrator.',
+        suspended: true,
+      });
+    }
+
+    // Role-based approval checks
+    if (user.role === 'EXECUTIVE') {
+      const adminUser = await prisma.adminUser.findUnique({ where: { userId: user.id } });
+      const partner = await prisma.pathologyPartner.findUnique({ where: { userId: user.id } });
+      if (partner?.approvalStatus === 'SUSPENDED') {
+        return res.status(403).json({ error: 'Your phlebotomist account has been suspended.', suspended: true });
+      }
+      if (partner?.approvalStatus === 'REJECTED') {
+        return res.status(403).json({ error: `Your phlebotomist application was rejected: ${partner.rejectionReason || 'Contact support.'}`, rejected: true });
+      }
+      if ((adminUser && !adminUser.isActive) || (partner && partner.approvalStatus === 'PENDING')) {
+        return res.status(403).json({
+          error: 'Your account is awaiting admin approval. You will be able to login once your account is approved.',
+          pendingApproval: true,
+          role: user.role
+        });
+      }
+    }
+
+    if (user.role === 'PATHOLOGIST' || (user.role as string) === 'DOCTOR') {
+      const doctor = await prisma.doctor.findUnique({ where: { userId: user.id } });
+      if (doctor) {
+        if (doctor.approvalStatus === 'REJECTED') {
+          return res.status(403).json({ error: `Your doctor registration was rejected: ${doctor.rejectionReason || 'Please contact support.'}`, rejected: true });
+        }
+        if (doctor.approvalStatus === 'SUSPENDED') {
+          return res.status(403).json({ error: 'Your doctor account has been suspended. Please contact LMS Administrator.', suspended: true });
+        }
+        if (doctor.approvalStatus === 'PENDING' || !doctor.isActive) {
+          return res.status(403).json({
+            error: 'Your account is awaiting admin approval. You will be able to login once your account is approved.',
+            pendingApproval: true,
+            role: user.role
+          });
+        }
+      }
+    }
+
+    if (user.role === 'PATHOLOGY_PARTNER') {
+      const partner = await prisma.pathologyPartner.findUnique({ where: { userId: user.id } });
+      if (!partner) return res.status(403).json({ error: 'Partner profile not found' });
+      if (partner.approvalStatus === 'PENDING') {
+        return res.status(403).json({
+          error: 'Your account is awaiting admin approval. You will be able to login once your account is approved.',
+          pendingApproval: true,
+          role: user.role
+        });
+      }
+      if (partner.approvalStatus === 'REJECTED') {
+        return res.status(403).json({ error: `Registration rejected: ${partner.rejectionReason || 'Contact support.'}`, rejected: true });
+      }
+      if (partner.approvalStatus === 'SUSPENDED') {
+        return res.status(403).json({ error: 'Your account has been suspended. Contact support.', suspended: true });
+      }
+    }
+
+    // Role-specific records
+    const doctorRecord = (user.role === 'PATHOLOGIST' || (user.role as string) === 'DOCTOR')
+      ? await prisma.doctor.findUnique({ where: { userId: user.id } })
+      : null;
+    const partnerRecord = ((user.role as string) === 'EXECUTIVE' || (user.role as string) === 'PATHOLOGY_PARTNER')
+      ? await prisma.pathologyPartner.findUnique({ where: { userId: user.id } })
+      : null;
+
+    // Issue standard MedsSeva JWT session
+    const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '15d' });
+
+    return res.json({
+      message: 'Login successful',
+      user: {
+        id: user.id,
+        name: user.name,
+        mobile: user.mobile,
+        email: user.email,
+        role: user.role,
+        uhid: user.uhid,
+        referralCode: user.referralCode,
+        doctor: doctorRecord,
+        partner: partnerRecord,
+      },
+      token,
+    });
+  } catch (error: any) {
+    console.error('[AUTH] loginWithFirebaseToken error:', error);
+    res.status(500).json({ error: 'Failed to authenticate with Firebase', details: error.message });
+  }
+};
+
 export const loginWithOtp = async (req: Request, res: Response) => {
   try {
+    if (req.body.idToken) {
+      return loginWithFirebaseToken(req, res);
+    }
     const { mobile, otp } = req.body;
     if (!mobile || !otp) return res.status(400).json({ error: 'Mobile and OTP are required' });
     const cleanMobile = String(mobile).replace(/\D/g, '').slice(-10);

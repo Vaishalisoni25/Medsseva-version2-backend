@@ -3,7 +3,7 @@ import {
   register, registerPartner, registerDoctor, registerPhlebotomist, login, getAllUsers, checkMobile,
   createPatientUser, updatePatientUser, deletePatientUser,
   getPartners, updatePartnerApproval, getAvailablePartners, getMe,
-  sendOtp, verifyOtp, resetPassword, loginWithOtp,
+  sendOtp, verifyOtp, resetPassword, loginWithOtp, loginWithFirebaseToken,
   sendEmailOtp, verifyEmailOtp,
   sendForgotPasswordOtp, verifyForgotPasswordOtp,
   doctorLogin, partnerLogin,
@@ -24,6 +24,7 @@ router.post('/partner/login', partnerLogin);
 router.post('/otp/send', sendOtp);
 router.post('/otp/verify', verifyOtp);
 router.post('/otp/login', loginWithOtp);
+router.post('/firebase/login', loginWithFirebaseToken);
 
 router.post('/email/send-otp', sendEmailOtp);
 router.post('/email/verify-otp', verifyEmailOtp);
