@@ -49,6 +49,7 @@ const DEFAULT_ORIGINS = [
   'http://localhost:3000',
   'http://localhost:8081',
   'https://medsseva-admin-dashboard.vercel.app',
+  'https://medsseva-version2-admin.vercel.app',
 ];
 
 const ALLOWED_ORIGINS = [

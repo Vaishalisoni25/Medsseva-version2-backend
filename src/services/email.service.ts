@@ -507,7 +507,24 @@ export async function sendReportWhatsApp(toMobile: string, details: ReportDelive
     cleanMobile = `91${cleanMobile}`;
   }
 
-  const message = `Hello *${details.patientName}*,\n\nYour official diagnostic lab report from *MedsSeva Diagnostics* is ready.\n\n📋 *Booking Code:* ${details.bookingCode}\n🧪 *Tests:* ${details.testNames.join(', ') || 'Diagnostic Pathology'}\n👨‍⚕️ *Doctor:* ${details.doctorName}\n\n🔗 *Verify & View Report:* ${details.verificationUrl}\n\n_Thank you for choosing MedsSeva._`;
+  const pdfSection = details.pdfUrl ? `\n\n📄 *Download Original Signed PDF:*\n${details.pdfUrl}` : '';
+
+  const message = `🏥 *MEDSSEVA DIAGNOSTICS & RESEARCH CENTRE*
+_ISO 15189 & NABL Accredited Laboratory Network_
+━━━━━━━━━━━━━━━━━━━━━━
+Dear *${details.patientName}*,
+
+Your official diagnostic test report has been certified by our clinical pathology department.
+
+📋 *Booking ID:* ${details.bookingCode}
+🧪 *Investigation:* ${details.testNames.join(', ') || 'Diagnostic Pathology'}
+👨‍⚕️ *Consultant Pathologist:* ${details.doctorName}
+━━━━━━━━━━━━━━━━━━━━━━
+🔗 *View Digital Report:*
+${details.verificationUrl}${pdfSection}
+━━━━━━━━━━━━━━━━━━━━━━
+_MedsSeva - Smart Diagnostics. Better Care._
+_Support: medssevaofficial@gmail.com_`;
 
   const shareUrl = `https://api.whatsapp.com/send?phone=${cleanMobile}&text=${encodeURIComponent(message)}`;
 
