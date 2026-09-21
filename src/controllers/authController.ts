@@ -1551,6 +1551,10 @@ export const sendOtp = async (req: Request, res: Response) => {
 
     // 5. Trigger Brevo Transactional SMS to registered mobile number
     const smsResult = await sendOtpSms(cleanMobile, otp);
+    console.log(`\n======================================================`);
+    console.log(`[OTP DISPATCH] Mobile: ${cleanMobile} | OTP: ${otp}`);
+    console.log(`[BREVO SMS STATUS] ${smsResult.sent ? 'SUCCESS' : 'FAILED: ' + (smsResult.error || 'Check Brevo SMS addon credits')}`);
+    console.log(`======================================================\n`);
 
     return res.json({
       success: true,
