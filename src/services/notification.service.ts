@@ -2,6 +2,7 @@ import { NotificationType, NotificationStatus } from '@prisma/client';
 import { google } from 'googleapis';
 import axios from 'axios';
 import { prisma } from '../lib/prisma';
+import { sendGeneralSms } from './email.service';
 
 const CHANNEL_MAP: Record<NotificationType, string> = {
   BOOKING_CREATED: 'bookings',
@@ -305,6 +306,20 @@ export const triggerApprovalNotification = async (
     }
   } catch (err) {
     console.warn('Push notification send error:', err);
+  }
+
+  // Trigger SMS notification to user's registered mobile number
+  try {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (user?.mobile) {
+      const cleanMobile = String(user.mobile).replace(/\D/g, '').slice(-10);
+      if (cleanMobile.length === 10) {
+        const approvalSms = `Your MedsSeva account has been approved by Admin. You can now login using your registered mobile number and OTP.`;
+        await sendGeneralSms(cleanMobile, approvalSms).catch(e => console.warn('[APPROVAL SMS ERROR]', e.message));
+      }
+    }
+  } catch (err) {
+    console.warn('SMS approval notification error:', err);
   }
 };
 

@@ -293,7 +293,7 @@ export async function sendReportEmail(toEmail: string, details: ReportDeliveryDe
   }
 }
 
-export async function sendOtpSms(toMobile: string, otp: string): Promise<{ sent: boolean; messageId?: string; error?: string }> {
+export async function sendGeneralSms(toMobile: string, content: string): Promise<{ sent: boolean; messageId?: string; error?: string }> {
   const apiKey = process.env.BREVO_API_KEY;
   if (!apiKey) {
     return { sent: false, error: 'BREVO_API_KEY is not configured' };
@@ -303,8 +303,6 @@ export async function sendOtpSms(toMobile: string, otp: string): Promise<{ sent:
   if (cleanMobile.length === 10) {
     cleanMobile = `91${cleanMobile}`;
   }
-
-  const smsText = `Your MedsSeva verification code is ${otp}. Valid for 5 minutes. Do not share this code with anyone.`;
 
   try {
     const response = await fetch('https://api.brevo.com/v3/transactionalSMS/sms', {
@@ -316,7 +314,7 @@ export async function sendOtpSms(toMobile: string, otp: string): Promise<{ sent:
       body: JSON.stringify({
         sender: 'MedsSeva',
         recipient: cleanMobile,
-        content: smsText,
+        content,
         type: 'transactional',
       }),
     });
@@ -333,6 +331,11 @@ export async function sendOtpSms(toMobile: string, otp: string): Promise<{ sent:
     console.warn('[Brevo SMS Dispatch Error]', err);
     return { sent: false, error: err.message };
   }
+}
+
+export async function sendOtpSms(toMobile: string, otp: string): Promise<{ sent: boolean; messageId?: string; error?: string }> {
+  const smsText = `Your MedsSeva login OTP is ${otp}. This OTP is valid for 5 minutes. Do not share it with anyone.`;
+  return sendGeneralSms(toMobile, smsText);
 }
 
 export async function sendReportSMS(toMobile: string, details: ReportDeliveryDetails): Promise<{ sent: boolean; messageId?: string; error?: string }> {

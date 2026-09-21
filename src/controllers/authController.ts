@@ -470,7 +470,7 @@ export const register = async (req: Request, res: Response) => {
         email,
         mobile,
         password: hashedPassword,
-        emailVerified: false,
+        emailVerified: true,
         otpHash,
         otpExpiresAt,
         otpAttempts: 0,
@@ -503,16 +503,29 @@ export const register = async (req: Request, res: Response) => {
       }
     }
 
-    try {
-      await sendOtpEmail(email, name, otp);
-    } catch (emailError: any) {
-      console.warn('Email send warning during registration (falling back):', emailError.message, 'OTP generated:', otp);
+    const cleanMobile = String(mobile || '').replace(/\D/g, '').slice(-10);
+
+    if (cleanMobile.length === 10) {
+      try {
+        const smsResult = await sendOtpSms(cleanMobile, otp);
+        console.log(`[AUTH] Registration OTP SMS dispatched to ${cleanMobile}:`, smsResult);
+      } catch (smsError: any) {
+        console.warn('[AUTH] Registration SMS send warning:', smsError.message);
+      }
     }
 
+    const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '30d' });
+
     res.status(201).json({
-      message: 'Registration initiated. Please verify your email address.',
-      requiresEmailVerification: true,
-      email,
+      message: 'Registration successful',
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        mobile: user.mobile,
+        role: user.role,
+      },
+      token,
     });
   } catch (error: any) {
     console.error('Registration error:', error);
@@ -613,13 +626,7 @@ export const login = async (req: Request, res: Response) => {
       });
     }
 
-    if (user.role === 'USER' && user.email && !user.emailVerified) {
-      return res.status(403).json({
-        error: 'Your email address is not verified. Please verify your email first.',
-        requiresEmailVerification: true,
-        email: user.email,
-      });
-    }
+
 
     if (user.role === 'EXECUTIVE') {
       const adminUser = await prisma.adminUser.findUnique({ where: { userId: user.id } });
@@ -1402,6 +1409,7 @@ interface MobileOtpRecord {
   expiresAt: Date;
   otp?: string;
   attempts: number;
+  lastSentAt?: Date;
 }
 const mobileOtpStore = new Map<string, MobileOtpRecord>();
 
@@ -1415,22 +1423,120 @@ export const sendOtp = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Please enter a valid 10-digit mobile number' });
     }
 
-    const otp = generateOtp(4);
-    const otpHash = await hashOtp(otp);
-    const otpExpiresAt = getOtpExpiry();
-
-    // Store in-memory
-    mobileOtpStore.set(cleanMobile, {
-      otpHash,
-      expiresAt: otpExpiresAt,
-      otp,
-      attempts: 0,
-    });
-
-    // Also persist in DB if user already exists
+    // 1. Find user by mobile number
     const existingUser = await prisma.user.findFirst({
       where: { OR: [{ mobile: cleanMobile }, { mobile: String(mobile).trim() }] }
     });
+
+    // 2. Cooldown check (Rate limiting: 30 seconds)
+    const memRecord = mobileOtpStore.get(cleanMobile);
+    const lastSentTime = existingUser?.otpLastSentAt?.getTime() || memRecord?.lastSentAt?.getTime();
+    if (lastSentTime) {
+      const diffSec = (Date.now() - lastSentTime) / 1000;
+      if (diffSec < 30) {
+        return res.status(429).json({
+          error: `Please wait ${Math.ceil(30 - diffSec)} seconds before requesting a new OTP.`,
+        });
+      }
+    }
+
+    // 3. Role-based checks on existing user (Approval & Suspension)
+    if (existingUser) {
+      const userStatusRow = await prisma.$queryRawUnsafe<{ isActive: boolean }[]>(
+        'SELECT "isActive" FROM "User" WHERE "id" = $1',
+        existingUser.id
+      ).catch(() => []);
+      if (userStatusRow?.[0]?.isActive === false) {
+        return res.status(403).json({
+          error: 'Your account has been suspended by LMS Admin. Please contact support.',
+          suspended: true,
+        });
+      }
+
+      if (existingUser.role === 'DOCTOR' || (existingUser.role as string) === 'PATHOLOGIST') {
+        const doctor = await (prisma as any).doctor.findUnique({ where: { userId: existingUser.id } });
+        if (doctor) {
+          if (doctor.approvalStatus === 'REJECTED') {
+            return res.status(403).json({
+              error: `Your doctor registration was rejected: ${doctor.rejectionReason || 'Please contact support.'}`,
+              rejected: true,
+            });
+          }
+          if (doctor.approvalStatus === 'SUSPENDED') {
+            return res.status(403).json({
+              error: 'Your doctor account has been suspended. Please contact LMS Administrator.',
+              suspended: true,
+            });
+          }
+          if (doctor.approvalStatus === 'PENDING' || !doctor.isActive) {
+            return res.status(403).json({
+              error: 'Your account is awaiting admin approval. You will be able to login once your account is approved.',
+              pendingApproval: true,
+              role: existingUser.role,
+            });
+          }
+        }
+      } else if (existingUser.role === 'EXECUTIVE') {
+        const adminUser = await prisma.adminUser.findUnique({ where: { userId: existingUser.id } });
+        const partner = await prisma.pathologyPartner.findUnique({ where: { userId: existingUser.id } });
+        if (partner?.approvalStatus === 'SUSPENDED') {
+          return res.status(403).json({
+            error: 'Your phlebotomist account has been suspended. Please contact LMS Administrator.',
+            suspended: true,
+          });
+        }
+        if (partner?.approvalStatus === 'REJECTED') {
+          return res.status(403).json({
+            error: `Your phlebotomist application was rejected: ${partner.rejectionReason || 'Contact support.'}`,
+            rejected: true,
+          });
+        }
+        if ((adminUser && !adminUser.isActive) || (partner && partner.approvalStatus === 'PENDING')) {
+          return res.status(403).json({
+            error: 'Your account is awaiting admin approval. You will be able to login once your account is approved.',
+            pendingApproval: true,
+            role: existingUser.role,
+          });
+        }
+      } else if (existingUser.role === 'PATHOLOGY_PARTNER') {
+        const partner = await prisma.pathologyPartner.findUnique({ where: { userId: existingUser.id } });
+        if (partner) {
+          if (partner.approvalStatus === 'REJECTED') {
+            return res.status(403).json({
+              error: `Registration rejected: ${partner.rejectionReason || 'Contact support.'}`,
+              rejected: true,
+            });
+          }
+          if (partner.approvalStatus === 'SUSPENDED') {
+            return res.status(403).json({
+              error: 'Your account has been suspended. Contact support.',
+              suspended: true,
+            });
+          }
+          if (partner.approvalStatus === 'PENDING') {
+            return res.status(403).json({
+              error: 'Your account is awaiting admin approval. You will be able to login once your account is approved.',
+              pendingApproval: true,
+              role: existingUser.role,
+            });
+          }
+        }
+      }
+    }
+
+    // 4. Generate and store OTP (invalidating previous OTP)
+    const otp = generateOtp(4);
+    const otpHash = await hashOtp(otp);
+    const otpExpiresAt = getOtpExpiry();
+    const now = new Date();
+
+    mobileOtpStore.set(cleanMobile, {
+      otpHash,
+      expiresAt: otpExpiresAt,
+      attempts: 0,
+      lastSentAt: now,
+    });
+
     if (existingUser) {
       await prisma.user.update({
         where: { id: existingUser.id },
@@ -1438,16 +1544,13 @@ export const sendOtp = async (req: Request, res: Response) => {
           otpHash,
           otpExpiresAt,
           otpAttempts: 0,
-          otpLastSentAt: new Date(),
+          otpLastSentAt: now,
         }
       });
     }
 
-    console.log(`[AUTH] Dispatched 4-digit OTP for mobile ${cleanMobile}: ${otp}`);
-
-    // Trigger Brevo Transactional SMS
+    // 5. Trigger Brevo Transactional SMS to registered mobile number
     const smsResult = await sendOtpSms(cleanMobile, otp);
-    console.log(`[AUTH] Brevo SMS response for ${cleanMobile}:`, smsResult);
 
     return res.json({
       success: true,
@@ -1455,7 +1558,6 @@ export const sendOtp = async (req: Request, res: Response) => {
         ? 'Verification code sent to your mobile number via SMS'
         : 'OTP generated. SMS delivery initiated.',
       smsSent: smsResult.sent,
-      error: smsResult.error,
     });
   } catch (error: any) {
     console.error('[AUTH] sendOtp error:', error);
@@ -1604,15 +1706,29 @@ export const loginWithOtp = async (req: Request, res: Response) => {
     if (user.role === 'EXECUTIVE') {
       const adminUser = await prisma.adminUser.findUnique({ where: { userId: user.id } });
       const partner = await prisma.pathologyPartner.findUnique({ where: { userId: user.id } });
+      if (partner?.approvalStatus === 'SUSPENDED') {
+        return res.status(403).json({ error: 'Your phlebotomist account has been suspended.', suspended: true });
+      }
+      if (partner?.approvalStatus === 'REJECTED') {
+        return res.status(403).json({ error: `Your phlebotomist application was rejected: ${partner.rejectionReason || 'Contact support.'}`, rejected: true });
+      }
       if ((adminUser && !adminUser.isActive) || (partner && partner.approvalStatus === 'PENDING')) {
-        return res.status(403).json({ error: 'Your phlebotomist application is pending admin approval.', pendingApproval: true, role: user.role });
+        return res.status(403).json({ error: 'Your account is awaiting admin approval. You will be able to login once your account is approved.', pendingApproval: true, role: user.role });
       }
     }
 
     if (user.role === 'PATHOLOGIST' || (user.role as string) === 'DOCTOR') {
       const doctor = await prisma.doctor.findUnique({ where: { userId: user.id } });
-      if (doctor && !doctor.isActive) {
-        return res.status(403).json({ error: 'Your doctor registration is pending admin verification.', pendingApproval: true, role: user.role });
+      if (doctor) {
+        if (doctor.approvalStatus === 'REJECTED') {
+          return res.status(403).json({ error: `Your doctor registration was rejected: ${doctor.rejectionReason || 'Please contact support.'}`, rejected: true });
+        }
+        if (doctor.approvalStatus === 'SUSPENDED') {
+          return res.status(403).json({ error: 'Your doctor account has been suspended. Please contact LMS Administrator.', suspended: true });
+        }
+        if (doctor.approvalStatus === 'PENDING' || !doctor.isActive) {
+          return res.status(403).json({ error: 'Your account is awaiting admin approval. You will be able to login once your account is approved.', pendingApproval: true, role: user.role });
+        }
       }
     }
 
@@ -1620,7 +1736,7 @@ export const loginWithOtp = async (req: Request, res: Response) => {
       const partner = await prisma.pathologyPartner.findUnique({ where: { userId: user.id } });
       if (!partner) return res.status(403).json({ error: 'Partner profile not found' });
       if (partner.approvalStatus === 'PENDING') {
-        return res.status(403).json({ error: 'Your registration is pending admin approval.', pendingApproval: true, role: user.role });
+        return res.status(403).json({ error: 'Your account is awaiting admin approval. You will be able to login once your account is approved.', pendingApproval: true, role: user.role });
       }
       if (partner.approvalStatus === 'REJECTED') {
         return res.status(403).json({ error: `Registration rejected: ${partner.rejectionReason || 'Contact support.'}`, rejected: true });
@@ -1692,10 +1808,22 @@ export const sendEmailOtp = async (req: Request, res: Response) => {
 
     await sendOtpEmail(email, user.name, otp);
 
-    return res.json({ success: true, message: 'Verification code sent to your email' });
+    if (user.mobile) {
+      const cleanMobile = String(user.mobile).replace(/\D/g, '').slice(-10);
+      if (cleanMobile.length === 10) {
+        try {
+          const smsResult = await sendOtpSms(cleanMobile, otp);
+          console.log(`[AUTH] Resend OTP SMS dispatched to ${cleanMobile}:`, smsResult);
+        } catch (smsError: any) {
+          console.warn('[AUTH] Resend SMS send warning:', smsError.message);
+        }
+      }
+    }
+
+    return res.json({ success: true, message: 'Verification code sent to your mobile number & email' });
   } catch (error: any) {
     console.error('sendEmailOtp error:', error.message);
-    res.status(500).json({ error: 'Failed to send verification email. Please try again.' });
+    res.status(500).json({ error: 'Failed to send verification code. Please try again.' });
   }
 };
 

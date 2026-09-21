@@ -4,6 +4,7 @@ import { prisma } from '../lib/prisma';
 import { AuthRequest } from '../middlewares/authMiddleware';
 import { cloudinary } from '../config/cloudinary';
 import { uploadFileToStorage } from '../middlewares/upload';
+import { triggerApprovalNotification } from '../services/notification.service';
 
 export const getDoctors = async (req: AuthRequest, res: Response) => {
   try {
@@ -297,6 +298,9 @@ export const updateDoctor = async (req: AuthRequest, res: Response) => {
       data.password = hashedPassword;
     }
 
+    const previousDoctor = await (prisma as any).doctor.findUnique({ where: { id } });
+    if (!previousDoctor) return res.status(404).json({ error: 'Doctor not found' });
+
     const doctor = await (prisma as any).doctor.update({
       where: { id },
       data,
@@ -323,6 +327,13 @@ export const updateDoctor = async (req: AuthRequest, res: Response) => {
           where: { userId: doctor.userId },
           data: { isActive },
         }).catch(console.error);
+      }
+
+      const isApprovedNow = (data.approvalStatus === 'APPROVED' || (data.isActive === true && data.approvalStatus !== 'REJECTED' && data.approvalStatus !== 'SUSPENDED'));
+      const wasApprovedBefore = (previousDoctor.approvalStatus === 'APPROVED' && previousDoctor.isActive === true);
+
+      if (isApprovedNow && !wasApprovedBefore) {
+        triggerApprovalNotification(doctor.userId, 'Doctor').catch(console.error);
       }
     }
 
