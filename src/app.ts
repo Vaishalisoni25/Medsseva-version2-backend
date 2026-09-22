@@ -38,6 +38,7 @@ import expenseRoutes from './routes/expenseRoutes';
 import outsourceRoutes from './routes/outsourceRoutes';
 import googleReviewRoutes from './routes/googleReviewRoutes';
 import collectionPartnerRoutes from './routes/collectionPartnerRoutes';
+import serviceAreaRoutes from './routes/serviceAreaRoutes';
 import { globalLimiter } from './middlewares/rateLimiter';
 import { errorHandler } from './middlewares/errorHandler';
 import { apiRequestLogger } from './middlewares/apiLogger';
@@ -132,6 +133,7 @@ app.use('/api/expenses', expenseRoutes);
 app.use('/api/outsource', outsourceRoutes);
 app.use('/api/reviews', googleReviewRoutes);
 app.use('/api/collection-partners', collectionPartnerRoutes);
+app.use('/api/service-areas', serviceAreaRoutes);
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' });

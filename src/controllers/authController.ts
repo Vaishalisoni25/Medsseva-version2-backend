@@ -1645,6 +1645,147 @@ export const verifyOtp = async (req: Request, res: Response) => {
   }
 };
 
+export const registerWithFirebaseToken = async (req: Request, res: Response) => {
+  try {
+    const { idToken, name, email, referralCode } = req.body;
+
+    if (!idToken || !name || !email) {
+      return res.status(400).json({ error: 'idToken, name, and email are required' });
+    }
+
+    if (!firebaseAuth) {
+      return res.status(500).json({ error: 'Firebase Auth is not initialized on the server.' });
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const cleanEmail = String(email).trim().toLowerCase();
+    if (!emailRegex.test(cleanEmail)) {
+      return res.status(400).json({ error: 'Invalid email address format' });
+    }
+
+    let decodedToken;
+    try {
+      decodedToken = await firebaseAuth.verifyIdToken(idToken);
+    } catch (err: any) {
+      console.error('[AUTH] Firebase verifyIdToken error:', err.message);
+      return res.status(401).json({
+        error: 'Invalid or expired Firebase verification token. Please request a new OTP.',
+        details: err.message,
+      });
+    }
+
+    const verifiedPhone = decodedToken.phone_number;
+    if (!verifiedPhone) {
+      return res.status(400).json({ error: 'Firebase token does not contain a verified phone number.' });
+    }
+
+    const mobile = verifiedPhone.replace(/\D/g, '').slice(-10);
+    if (mobile.length !== 10) {
+      return res.status(400).json({ error: 'Verified phone number must be a valid 10-digit Indian mobile.' });
+    }
+
+    const existingUser = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { mobile },
+          { mobile: verifiedPhone },
+          { mobile: `+91${mobile}` },
+          { email: cleanEmail },
+        ],
+      },
+    });
+
+    if (existingUser) {
+      if (existingUser.mobile === mobile || existingUser.mobile === verifiedPhone || existingUser.mobile === `+91${mobile}`) {
+        return res.status(400).json({ error: 'Mobile number already registered. Please login instead.' });
+      }
+      return res.status(400).json({ error: 'Email already in use. Try a different email.' });
+    }
+
+    let referredById: string | null = null;
+    let isFirstTestFreeEligible = false;
+
+    if (referralCode && typeof referralCode === 'string' && referralCode.trim() !== '') {
+      const cleanReferral = referralCode.trim().toUpperCase();
+      const referrer = await prisma.user.findUnique({
+        where: { referralCode: cleanReferral },
+      });
+      if (!referrer) {
+        return res.status(400).json({ error: 'Invalid referral code entered. Please check the code or leave it empty.' });
+      }
+      if (referrer.mobile === mobile || (cleanEmail && referrer.email === cleanEmail)) {
+        return res.status(400).json({ error: 'You cannot use your own referral code.' });
+      }
+      referredById = referrer.id;
+      isFirstTestFreeEligible = true;
+    }
+
+    const randomPassword = Math.random().toString(36).slice(-10) + 'A1!';
+    const hashedPassword = await bcrypt.hash(randomPassword, 10);
+    const userReferralCode = await generateUniqueReferralCode();
+
+    const user = await prisma.user.create({
+      data: {
+        name: String(name).trim(),
+        email: cleanEmail,
+        mobile,
+        password: hashedPassword,
+        emailVerified: true,
+        emailVerifiedAt: new Date(),
+        referralCode: userReferralCode,
+        referredById,
+        isFirstTestFreeEligible,
+      },
+    });
+
+    if (referredById) {
+      try {
+        const settings = await prisma.systemSettings.findUnique({ where: { id: 'singleton' } });
+        const rewardAmount = settings?.referralRewardAmount || 100;
+
+        await prisma.user.update({
+          where: { id: referredById },
+          data: { walletBalance: { increment: rewardAmount } },
+        });
+
+        await prisma.walletTransaction.create({
+          data: {
+            userId: referredById,
+            amount: rewardAmount,
+            type: 'CREDIT',
+            description: `Referral reward for inviting ${user.name}`,
+          },
+        });
+      } catch (err: any) {
+        console.error('[AUTH] Failed to process referral reward:', err.message);
+      }
+    }
+
+    if (user.email) {
+      sendWelcomeEmail(user.email, user.name, 'Patient').catch(err => console.warn('[Welcome Email Patient Error]', err.message));
+    }
+
+    const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '15d' });
+
+    return res.status(201).json({
+      message: 'Registration successful',
+      user: {
+        id: user.id,
+        name: user.name,
+        mobile: user.mobile,
+        email: user.email,
+        role: user.role,
+        uhid: user.uhid,
+        referralCode: user.referralCode,
+      },
+      token,
+    });
+  } catch (error: any) {
+    console.error('[AUTH] registerWithFirebaseToken error:', error);
+    res.status(500).json({ error: 'Failed to register', details: error.message });
+  }
+};
+
 export const loginWithFirebaseToken = async (req: Request, res: Response) => {
   try {
     const { idToken, expectedRole } = req.body;
