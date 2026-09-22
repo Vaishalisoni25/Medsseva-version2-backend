@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "nodemon src/server.ts",
     "start": "node dist/server.js",
-    "build": "tsc",
+    "build": "prisma migrate deploy && tsc",
     "postinstall": "prisma generate",
     "seed": "prisma db seed",
     "db:push": "prisma db push --accept-data-loss"
