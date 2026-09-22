@@ -143,15 +143,18 @@ export async function seedRbac(prisma: PrismaClient) {
   console.log('Role-permission mapping done');
 
   // 5. Create Super Admin User + AdminUser
-  const hashedPassword = await bcrypt.hash('SuperAdmin@123', 10);
+  const hashedPassword = await bcrypt.hash('Medsseva@2026', 10);
 
   const superAdminUser = await prisma.user.upsert({
-    where: { mobile: '9999999999' },
-    update: {},
+    where: { mobile: '8448030936' },
+    update: {
+      email: 'medssevalab2026@gmail.com',
+      password: hashedPassword,
+    },
     create: {
       name: 'MedsSeva Super Admin',
-      email: 'superadmin@medseva.in',
-      mobile: '9999999999',
+      email: 'medssevalab2026@gmail.com',
+      mobile: '8448030936',
       password: hashedPassword,
       role: 'SUPER_ADMIN',
     },
@@ -168,5 +171,5 @@ export async function seedRbac(prisma: PrismaClient) {
     },
   });
 
-  console.log('Super admin user created (mobile: 9999999999 / password: SuperAdmin@123)');
+  console.log('Super admin user created (mobile: 8448030936 / password: Medsseva@2026)');
 }
