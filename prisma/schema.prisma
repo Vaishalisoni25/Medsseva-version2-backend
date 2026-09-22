@@ -102,6 +102,8 @@ model Address {
   city      String
   state     String
   pincode   String
+  latitude  Float?
+  longitude Float?
   isDefault Boolean @default(false)
   user      User    @relation(fields: [userId], references: [id])
 }
@@ -464,6 +466,8 @@ model AdminUser {
   partnerId          String?
   userType           String?             @default("STAFF")
   isActive           Boolean             @default(true)
+  latitude           Float?
+  longitude          Float?
   createdAt          DateTime            @default(now())
   user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   role               AdminRole           @relation(fields: [roleId], references: [id])
@@ -657,6 +661,7 @@ model PathologyPartner {
   preferredServiceArea String?
   latitude             Float?
   longitude            Float?
+  serviceRadiusKm      Float                      @default(3)
   commissionRate       Float                      @default(30.0)
   paymentCycle         String                     @default("MONTHLY")
   approvalStatus       PartnerApprovalStatus      @default(PENDING)

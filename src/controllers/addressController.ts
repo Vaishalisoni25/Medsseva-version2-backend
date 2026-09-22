@@ -1,9 +1,10 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
+import { assertPincodeServiceable, normalizePincode } from '../services/serviceArea.service';
 
 export const getAddresses = async (req: Request, res: Response) => {
   try {
-    const { mobile } = req.query; // Identifying user by mobile for now since we haven't implemented full JWT extraction in middleware
+    const { mobile } = req.query;
 
     if (!mobile) {
       return res.status(400).json({ error: 'Mobile number is required' });
@@ -29,7 +30,7 @@ export const getAddresses = async (req: Request, res: Response) => {
 
 export const addAddress = async (req: Request, res: Response) => {
   try {
-    const { mobile, type, line1, line2, city, state, pincode, isDefault } = req.body;
+    const { mobile, type, line1, line2, city, state, pincode, isDefault, latitude, longitude } = req.body;
 
     const user = await prisma.user.findUnique({
       where: { mobile: mobile as string }
@@ -39,7 +40,17 @@ export const addAddress = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    // Unset default if this one is default
+    const normalizedPincode = normalizePincode(pincode);
+    if (!normalizedPincode || normalizedPincode.length < 6) {
+      return res.status(400).json({ error: 'Valid 6-digit pincode is required.' });
+    }
+
+    try {
+      await assertPincodeServiceable(normalizedPincode);
+    } catch (err: any) {
+      return res.status(400).json({ error: err.message || 'Services are not available in your area.' });
+    }
+
     if (isDefault) {
       await prisma.address.updateMany({
         where: { userId: user.id },
@@ -55,7 +66,9 @@ export const addAddress = async (req: Request, res: Response) => {
         line2,
         city,
         state,
-        pincode,
+        pincode: normalizedPincode,
+        latitude: latitude != null ? Number(latitude) : null,
+        longitude: longitude != null ? Number(longitude) : null,
         isDefault
       }
     });

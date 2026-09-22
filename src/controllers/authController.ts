@@ -260,7 +260,7 @@ export const registerPartner = async (req: Request, res: Response) => {
 
 export const registerPhlebotomist = async (req: Request, res: Response) => {
   try {
-    const { name, email, mobile, qualification, otherDetails, experience, serviceArea, address, documents, document } = req.body;
+    const { name, email, mobile, qualification, otherDetails, experience, serviceArea, address, pincode, latitude, longitude, documents, document } = req.body;
     console.log('[AUTH] >>> POST /api/auth/register/phlebotomist received with body:', { name, mobile, email, qualification, otherDetails, docCount: Array.isArray(documents) ? documents.length : (document ? 1 : 0) });
 
     const cleanMobile = String(mobile || '').trim().replace(/\D/g, '').slice(-10);
@@ -352,6 +352,8 @@ export const registerPhlebotomist = async (req: Request, res: Response) => {
         registrationNo: docsArray.map((d: any) => String(d.documentType || '').toUpperCase()).filter(Boolean).join(' + ') || null,
         userType: 'FREELANCER',
         isActive: false, // PENDING approval
+        latitude: latitude != null ? Number(latitude) : null,
+        longitude: longitude != null ? Number(longitude) : null,
       }
     });
 
@@ -363,7 +365,9 @@ export const registerPhlebotomist = async (req: Request, res: Response) => {
           line1: address.trim(),
           city: serviceArea ? serviceArea.trim() : 'Delhi NCR',
           state: 'Delhi',
-          pincode: '110001',
+          pincode: String(pincode || '110001').replace(/\D/g, '').slice(0, 6) || '110001',
+          latitude: latitude != null ? Number(latitude) : null,
+          longitude: longitude != null ? Number(longitude) : null,
           isDefault: true,
         }
       }).catch(err => console.warn('Phlebotomist address creation non-fatal:', err.message));
@@ -377,6 +381,8 @@ export const registerPhlebotomist = async (req: Request, res: Response) => {
         role: 'PHLEBOTOMIST',
         partnerCode: `PHLEBO-${user.id.slice(0, 5).toUpperCase()}`,
         address: address ? address.trim() : (serviceArea ? serviceArea.trim() : 'Independent Collection Partner'),
+        latitude: latitude != null ? Number(latitude) : null,
+        longitude: longitude != null ? Number(longitude) : null,
         approvalStatus: 'PENDING',
         commissionRate: 30,
         paymentCycle: 'WEEKLY',

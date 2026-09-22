@@ -5,8 +5,10 @@ import crypto from 'crypto';
 import { env } from '../config/env';
 import { pricingService } from '../services/pricing.service';
 import { paymentService } from '../services/payment.service';
-import { sendNotificationToUser, sendNotificationToMultipleUsers } from '../services/notification.service';
+import { sendNotificationToUser } from '../services/notification.service';
 import { getOrFindPartner } from './partnerController';
+import { assertPincodeServiceable } from '../services/serviceArea.service';
+import { notifyNearbyCollectorsForBooking } from '../services/bookingAssignment.service';
 
 const generateSlotsFromSettings = (openTime: string, closeTime: string): string[] => {
   const toMinutes = (t: string): number => {
@@ -270,6 +272,21 @@ const user = await prisma.user.findUnique({ where: { id: req.user.id } });
       finalAddressId = defaultAddr.id;
     }
 
+    if (safeCollectionMode === 'HOME' && finalAddressId) {
+      const bookingAddress = await prisma.address.findUnique({ where: { id: finalAddressId } });
+      if (!bookingAddress) {
+        return res.status(400).json({ error: 'Selected address not found.' });
+      }
+      try {
+        await assertPincodeServiceable(bookingAddress.pincode);
+      } catch (err: any) {
+        return res.status(400).json({ error: err.message || 'Services are not available in your area.' });
+      }
+      if (bookingAddress.latitude == null || bookingAddress.longitude == null) {
+        return res.status(400).json({ error: 'Please update your address with location/GPS before booking home collection.' });
+      }
+    }
+
     const parsedDate = scheduledDate ? new Date(scheduledDate) : new Date(Date.now() + 86400000);
     if (isNaN(parsedDate.getTime())) return res.status(400).json({ error: 'Invalid booking date.' });
 
@@ -386,19 +403,7 @@ const user = await prisma.user.findUnique({ where: { id: req.user.id } });
     sendNotificationToUser(user.id, 'Booking Created', 'Your booking has been created successfully.', 'BOOKING_CREATED', { bookingId: booking.id }).catch(console.error);
 
     if (safeCollectionMode === 'HOME') {
-      const availablePartners = await prisma.pathologyPartner.findMany({
-        where: { approvalStatus: 'APPROVED', isAvailable: true },
-        include: { user: { select: { id: true } } },
-      });
-      if (availablePartners.length > 0) {
-        sendNotificationToMultipleUsers(
-          availablePartners.map(p => p.user.id),
-          'New Booking Assigned',
-          `${booking.user?.name || 'A patient'} has placed a new booking.`,
-          'NEW_BOOKING_ASSIGNED',
-          { bookingId: booking.id }
-        ).catch(console.error);
-      }
+      notifyNearbyCollectorsForBooking(booking.id, booking.user?.name || user.name).catch(console.error);
     }
 
     res.status(201).json(booking);

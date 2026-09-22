@@ -5,7 +5,9 @@ import { env } from '../config/env';
 import { pricingService, PricingInput, PricingResult } from './pricing.service';
 import { sequenceService } from './sequence.service';
 import { invoiceService } from './invoice.service';
-import { sendNotificationToUser, sendNotificationToMultipleUsers } from './notification.service';
+import { sendNotificationToUser } from './notification.service';
+import { assertPincodeServiceable } from './serviceArea.service';
+import { notifyNearbyCollectorsForBooking } from './bookingAssignment.service';
 import { logAudit } from '../utils/auditLogger';
 
 const razorpay = new Razorpay({
@@ -65,6 +67,29 @@ export class PaymentService {
       couponCode,
       userId,
     });
+
+    const safeCollectionMode = String(collectionMode || '').toLowerCase() === 'lab' ? 'LAB' : 'HOME';
+    if (safeCollectionMode === 'HOME') {
+      let resolvedAddressId = addressId;
+      if (!resolvedAddressId) {
+        const defaultAddr = await prisma.address.findFirst({
+          where: { userId },
+          orderBy: { isDefault: 'desc' },
+        });
+        resolvedAddressId = defaultAddr?.id;
+      }
+      if (!resolvedAddressId) {
+        throw new Error('No address found. Please add an address before booking.');
+      }
+      const bookingAddress = await prisma.address.findUnique({ where: { id: resolvedAddressId } });
+      if (!bookingAddress) {
+        throw new Error('Selected address not found.');
+      }
+      await assertPincodeServiceable(bookingAddress.pincode);
+      if (bookingAddress.latitude == null || bookingAddress.longitude == null) {
+        throw new Error('Please update your address with location/GPS before booking home collection.');
+      }
+    }
 
     const idempotencyKey = crypto
       .createHash('sha256')
@@ -216,6 +241,15 @@ export class PaymentService {
       finalAddressId = defaultAddr.id;
     }
 
+    if (safeCollectionMode === 'HOME' && finalAddressId) {
+      const bookingAddress = await prisma.address.findUnique({ where: { id: finalAddressId } });
+      if (!bookingAddress) throw new Error('Selected address not found.');
+      await assertPincodeServiceable(bookingAddress.pincode);
+      if (bookingAddress.latitude == null || bookingAddress.longitude == null) {
+        throw new Error('Please update your address with location/GPS before booking home collection.');
+      }
+    }
+
     const scheduledDate = payload.scheduledDate
       ? new Date(payload.scheduledDate)
       : new Date();
@@ -328,19 +362,7 @@ export class PaymentService {
     ).catch(console.error);
 
     if (safeCollectionMode === 'HOME') {
-      const availablePartners = await prisma.pathologyPartner.findMany({
-        where: { approvalStatus: 'APPROVED', isAvailable: true },
-        include: { user: { select: { id: true } } },
-      });
-      if (availablePartners.length > 0) {
-        sendNotificationToMultipleUsers(
-          availablePartners.map(p => p.user.id),
-          'New Booking Available',
-          `A new home collection booking is available.`,
-          'NEW_BOOKING_ASSIGNED',
-          { bookingId }
-        ).catch(console.error);
-      }
+      notifyNearbyCollectorsForBooking(bookingId, user.name).catch(console.error);
     }
 
     return bookingId;

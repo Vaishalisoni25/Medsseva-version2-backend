@@ -2,7 +2,11 @@ import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { sendNotificationToUser } from '../services/notification.service';
 import { paymentService } from '../services/payment.service';
-import { isWithinServiceRadius } from '../utils/geo.utils';
+import {
+  getBookingLocation,
+  getCollectorContext,
+  isBookingWithinCollectorRadius,
+} from '../services/bookingAssignment.service';
 
 export async function getOrFindPartner(userId: string, userRole?: string) {
   let partner = await prisma.pathologyPartner.findUnique({ where: { userId } });
@@ -91,34 +95,31 @@ export const getPartnerBookings = async (req: any, res: Response) => {
   }
 };
 
-// broadcast notifications - WAITING_FOR_PARTNER bookings filtered by service radius & rejection status
+// broadcast notifications - WAITING_FOR_PARTNER bookings filtered by 3km service radius
 export const getPartnerNotifications = async (req: any, res: Response) => {
   try {
-    let collectorLat: number | null = null;
-    let collectorLon: number | null = null;
-    let radiusKm = 3;
-    let partnerId: string | null = null;
+    const collector = await getCollectorContext(req.user.id);
 
-    const partner = await getOrFindPartner(req.user.id, req.user.role);
-
-    if (partner) {
-      if (!partner.isAvailable) {
-        return res.json([]);
-      }
-      collectorLat = partner.latitude;
-      collectorLon = partner.longitude;
-      radiusKm = (partner as any).radiusKm || 3;
-      partnerId = partner.id;
+    if (!collector.isApproved) {
+      return res.status(403).json({ error: 'Collector profile not found or not approved.' });
     }
 
-    const excludedIds = partnerId
-      ? (await prisma.bookingRejection.findMany({ where: { partnerId }, select: { bookingId: true } })).map(r => r.bookingId)
+    if (collector.partnerId && !collector.isAvailable) {
+      return res.json([]);
+    }
+
+    if (!collector.latitude || !collector.longitude) {
+      return res.json([]);
+    }
+
+    const excludedIds = collector.partnerId
+      ? (await prisma.bookingRejection.findMany({ where: { partnerId: collector.partnerId }, select: { bookingId: true } })).map(r => r.bookingId)
       : [];
 
     const bookings = await prisma.booking.findMany({
       where: {
         collectionMode: 'HOME',
-        status: { in: ['WAITING_FOR_PARTNER', 'WAITING_FOR_ASSIGNMENT', 'PENDING'] },
+        status: 'WAITING_FOR_PARTNER',
         id: { notIn: excludedIds },
       },
       include: {
@@ -129,14 +130,18 @@ export const getPartnerNotifications = async (req: any, res: Response) => {
     });
 
     const formatted = (await Promise.all(bookings.map(async (b) => {
-      const address = await prisma.address.findUnique({ where: { id: b.addressId } });
-      const addrLat = address ? (address as any).latitude : null;
-      const addrLon = address ? (address as any).longitude : null;
+      const location = await getBookingLocation(b.addressId);
+      const withinRadius = isBookingWithinCollectorRadius(
+        location,
+        collector.latitude,
+        collector.longitude,
+        collector.radiusKm
+      );
+      if (!withinRadius) return null;
 
-      if (addrLat && addrLon && collectorLat && collectorLon) {
-        const withinRadius = isWithinServiceRadius(addrLat, addrLon, collectorLat, collectorLon, radiusKm);
-        if (!withinRadius) return null;
-      }
+      const address = b.addressId
+        ? await prisma.address.findUnique({ where: { id: b.addressId } })
+        : null;
 
       return {
         id: b.id,
@@ -148,8 +153,8 @@ export const getPartnerNotifications = async (req: any, res: Response) => {
         totalPaid: b.totalPaid,
         status: b.status,
         collectionAddress: address ? `${address.line1}, ${address.city}` : null,
-        latitude: addrLat,
-        longitude: addrLon,
+        latitude: location.latitude,
+        longitude: location.longitude,
         tests: b.tests.map(t => ({ name: t.test.name })),
         packages: b.packages.map(p => ({ name: p.package.name })),
       };
@@ -179,18 +184,17 @@ export const acceptBooking = async (req: any, res: Response) => {
     if (!existing) return res.status(404).json({ error: 'Booking not found.' });
 
     if (existing.addressId) {
-      const address = await prisma.address.findUnique({ where: { id: existing.addressId } });
-      const addrLat = address ? (address as any).latitude : null;
-      const addrLon = address ? (address as any).longitude : null;
-      const collectorLat = partner ? partner.latitude : null;
-      const collectorLon = partner ? partner.longitude : null;
-      const radiusKm = partner ? ((partner as any).radiusKm || 3) : 3;
+      const collector = await getCollectorContext(req.user.id);
+      const location = await getBookingLocation(existing.addressId);
+      const withinRadius = isBookingWithinCollectorRadius(
+        location,
+        collector.latitude,
+        collector.longitude,
+        collector.radiusKm
+      );
 
-      if (addrLat && addrLon && collectorLat && collectorLon) {
-        const withinRadius = isWithinServiceRadius(addrLat, addrLon, collectorLat, collectorLon, radiusKm);
-        if (!withinRadius) {
-          return res.status(403).json({ error: 'Booking address is outside your service radius.' });
-        }
+      if (!withinRadius) {
+        return res.status(403).json({ error: 'Booking address is outside your 3 km service radius.' });
       }
     }
 
