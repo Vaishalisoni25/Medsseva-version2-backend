@@ -125,7 +125,8 @@ const sendFcmToToken = async (
           priority: 'high',
           notification: {
             channel_id: channel,
-            click_action: 'FLUTTER_NOTIFICATION_CLICK',
+            sound: 'default',
+            default_vibrate_timings: true,
           },
         },
         apns: {
@@ -172,6 +173,20 @@ const isInvalidToken = (errorMsg: string): boolean => {
     'Requested entity was not found',
   ];
   return invalidPatterns.some(p => errorMsg.includes(p));
+};
+
+export const sendWelcomeNotification = async (
+  userId: string,
+  userName: string
+): Promise<void> => {
+  const firstName = (userName || 'there').split(' ')[0];
+  await sendNotificationToUser(
+    userId,
+    `Welcome to MedsSeva, ${firstName}!`,
+    'Your account is ready. Book lab tests, track collection, and get reports — all in one place.',
+    'BROADCAST',
+    { event: 'WELCOME' }
+  );
 };
 
 export const sendNotificationToUser = async (

@@ -10,7 +10,7 @@ import {
   isOtpExpired, isResendAllowed, getResendCooldownRemaining, MAX_ATTEMPTS
 } from '../services/otp.service';
 import { generateUniqueReferralCode } from '../utils/referral.utils';
-import { triggerApprovalNotification } from '../services/notification.service';
+import { triggerApprovalNotification, sendWelcomeNotification } from '../services/notification.service';
 import { firebaseAuth } from '../lib/firebaseAdmin';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-medsseva-key';
@@ -94,6 +94,7 @@ export const registerDoctor = async (req: Request, res: Response) => {
     if (user.email) {
       sendWelcomeEmail(user.email, user.name, 'Doctor').catch(err => console.warn('[Welcome Email Doctor Error]', err.message));
     }
+    sendWelcomeNotification(user.id, user.name).catch(err => console.warn('[Welcome Push Doctor Error]', err.message));
 
     res.status(201).json({
       message: 'Doctor registration submitted successfully. Awaiting verification.',
@@ -245,6 +246,7 @@ export const registerPartner = async (req: Request, res: Response) => {
     if (user.email) {
       sendWelcomeEmail(user.email, user.name, 'Pathology Partner').catch(err => console.warn('[Welcome Email Partner Error]', err.message));
     }
+    sendWelcomeNotification(user.id, user.name).catch(err => console.warn('[Welcome Push Partner Error]', err.message));
 
     res.status(201).json({
       message: 'Partner onboarding application submitted. Awaiting admin approval.',
@@ -423,6 +425,7 @@ export const registerPhlebotomist = async (req: Request, res: Response) => {
     if (user.email) {
       sendWelcomeEmail(user.email, user.name, 'Phlebotomist').catch(err => console.warn('[Welcome Email Phlebotomist Error]', err.message));
     }
+    sendWelcomeNotification(user.id, user.name).catch(err => console.warn('[Welcome Push Phlebotomist Error]', err.message));
 
     res.status(201).json({
       message: 'Phlebotomist application submitted. Awaiting admin approval.',
@@ -536,6 +539,7 @@ export const register = async (req: Request, res: Response) => {
     if (user.email) {
       sendWelcomeEmail(user.email, user.name, 'Patient').catch(err => console.warn('[Welcome Email Patient Error]', err.message));
     }
+    sendWelcomeNotification(user.id, user.name).catch(err => console.warn('[Welcome Push Patient Error]', err.message));
 
     const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '30d' });
 
@@ -1770,6 +1774,7 @@ export const registerWithFirebaseToken = async (req: Request, res: Response) => 
     if (user.email) {
       sendWelcomeEmail(user.email, user.name, 'Patient').catch(err => console.warn('[Welcome Email Patient Error]', err.message));
     }
+    sendWelcomeNotification(user.id, user.name).catch(err => console.warn('[Welcome Push Patient Error]', err.message));
 
     const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '15d' });
 
