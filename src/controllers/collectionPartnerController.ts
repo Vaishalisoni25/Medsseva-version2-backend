@@ -102,14 +102,25 @@ export const getCollectionPartners = async (req: Request, res: Response) => {
         select: { totalPaid: true, status: true }
       });
 
-      const totalSamples = executiveBookings.length;
-      const totalTestValue = executiveBookings.reduce((sum, b) => sum + (b.totalPaid || 0), 0);
-      const commissionRate = e.pathologyPartner?.commissionRate ?? 30.0;
-      const totalCommissionEarned = Math.round(totalTestValue * (commissionRate / 100));
-      const walletBalance = totalCommissionEarned;
-
       const adminUser = e.adminUser;
       const partner = e.pathologyPartner;
+
+      const isEmployee = !!(
+        adminUser && (
+          adminUser.userType === 'EMPLOYEE' ||
+          adminUser.userType === 'STAFF' ||
+          (adminUser.branchId && !partner) ||
+          (adminUser.designation && /staff|employee/i.test(adminUser.designation))
+        ) && !partner
+      );
+      const phlebotomistType = isEmployee ? 'EMPLOYEE' : 'FREELANCER';
+
+      const totalSamples = executiveBookings.length;
+      const totalTestValue = executiveBookings.reduce((sum, b) => sum + (b.totalPaid || 0), 0);
+      const commissionRate = isEmployee ? 0 : (partner?.commissionRate ?? 30.0);
+      const totalCommissionEarned = isEmployee ? 0 : Math.round(totalTestValue * (commissionRate / 100));
+      const walletBalance = totalCommissionEarned;
+
       let currentStatus = 'PENDING';
       if (partner?.approvalStatus) {
         currentStatus = partner.approvalStatus;
@@ -146,6 +157,8 @@ export const getCollectionPartners = async (req: Request, res: Response) => {
         assignedLab: branch ? { id: branch.id, name: branch.name, city: branch.city } : null,
         commissionRate,
         paymentCycle: partner?.paymentCycle || 'WEEKLY',
+        isEmployee,
+        phlebotomistType,
         totalSamplesCollected: totalSamples,
         totalTestValue,
         totalCommissionEarned,
@@ -391,9 +404,9 @@ export const getLabWiseCollections = async (req: Request, res: Response) => {
 export const updateCollectionPartnerStatus = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { approvalStatus, branchId } = req.body;
+    const { approvalStatus, branchId, commissionRate, paymentCycle, isAvailable } = req.body;
 
-    const isActive = approvalStatus === 'APPROVED';
+    const isActive = isAvailable !== undefined ? Boolean(isAvailable) : (approvalStatus === 'APPROVED');
 
     // Update AdminUser record for this executive user
     let adminUser = await prisma.adminUser.findUnique({ where: { userId: id } });
@@ -402,7 +415,7 @@ export const updateCollectionPartnerStatus = async (req: Request, res: Response)
         where: { userId: id },
         data: {
           isActive,
-          ...(branchId ? { branchId } : {})
+          ...(branchId !== undefined ? { branchId: branchId || null } : {})
         }
       });
     } else {
@@ -419,21 +432,25 @@ export const updateCollectionPartnerStatus = async (req: Request, res: Response)
           department: 'Collection Operations',
           designation: 'Phlebotomist',
           isActive,
-          ...(branchId ? { branchId } : {})
+          ...(branchId !== undefined ? { branchId: branchId || null } : {})
         }
       });
     }
 
-    // Also sync PathologyPartner record
+    // Also sync PathologyPartner record with dynamic commissionRate
     const existingPartner = await prisma.pathologyPartner.findUnique({ where: { userId: id } });
+    const finalCommRate = commissionRate !== undefined ? Number(commissionRate) : (existingPartner?.commissionRate ?? 30.0);
+    const finalPaymentCycle = paymentCycle || existingPartner?.paymentCycle || 'WEEKLY';
+
     if (existingPartner) {
       await prisma.pathologyPartner.update({
         where: { userId: id },
         data: {
-          approvalStatus,
+          ...(approvalStatus ? { approvalStatus } : {}),
           isAvailable: isActive,
-          commissionRate: 30.0,
-          ...(branchId ? { branchId } : {})
+          commissionRate: finalCommRate,
+          paymentCycle: finalPaymentCycle,
+          ...(branchId !== undefined ? { branchId: branchId || null } : {})
         }
       });
     } else {
@@ -444,9 +461,10 @@ export const updateCollectionPartnerStatus = async (req: Request, res: Response)
             userId: id,
             labName: `${userRec.name} (Freelance Phlebotomist)`,
             role: 'PHLEBOTOMIST',
-            approvalStatus,
+            approvalStatus: approvalStatus || 'APPROVED',
             isAvailable: isActive,
-            commissionRate: 30.0,
+            commissionRate: finalCommRate,
+            paymentCycle: finalPaymentCycle,
             branchId: branchId || undefined,
           }
         }).catch(console.error);
