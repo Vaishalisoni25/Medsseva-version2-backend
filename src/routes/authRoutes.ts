@@ -111,9 +111,9 @@ router.post('/demo-login', async (req, res) => {
     });
     
     res.json({ success: true, token, user: fullUser, message: 'Demo login successful' });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Demo login error:', error);
-    res.status(500).json({ error: 'Demo login failed: ' + (error.message || '') });
+    res.status(500).json({ error: 'Demo login failed: ' + (error?.message || '') });
   }
 });
 
