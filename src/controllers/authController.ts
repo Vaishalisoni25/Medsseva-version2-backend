@@ -10,7 +10,7 @@ import {
   isOtpExpired, isResendAllowed, getResendCooldownRemaining, MAX_ATTEMPTS
 } from '../services/otp.service';
 import { generateUniqueReferralCode } from '../utils/referral.utils';
-import { triggerApprovalNotification } from '../services/notification.service';
+import { triggerApprovalNotification, sendWelcomeNotification } from '../services/notification.service';
 import { firebaseAuth } from '../lib/firebaseAdmin';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-medsseva-key';
@@ -94,6 +94,7 @@ export const registerDoctor = async (req: Request, res: Response) => {
     if (user.email) {
       sendWelcomeEmail(user.email, user.name, 'Doctor').catch(err => console.warn('[Welcome Email Doctor Error]', err.message));
     }
+    sendWelcomeNotification(user.id, user.name).catch(err => console.warn('[Welcome Push Doctor Error]', err.message));
 
     res.status(201).json({
       message: 'Doctor registration submitted successfully. Awaiting verification.',
@@ -245,6 +246,7 @@ export const registerPartner = async (req: Request, res: Response) => {
     if (user.email) {
       sendWelcomeEmail(user.email, user.name, 'Pathology Partner').catch(err => console.warn('[Welcome Email Partner Error]', err.message));
     }
+    sendWelcomeNotification(user.id, user.name).catch(err => console.warn('[Welcome Push Partner Error]', err.message));
 
     res.status(201).json({
       message: 'Partner onboarding application submitted. Awaiting admin approval.',
@@ -423,6 +425,7 @@ export const registerPhlebotomist = async (req: Request, res: Response) => {
     if (user.email) {
       sendWelcomeEmail(user.email, user.name, 'Phlebotomist').catch(err => console.warn('[Welcome Email Phlebotomist Error]', err.message));
     }
+    sendWelcomeNotification(user.id, user.name).catch(err => console.warn('[Welcome Push Phlebotomist Error]', err.message));
 
     res.status(201).json({
       message: 'Phlebotomist application submitted. Awaiting admin approval.',
@@ -536,6 +539,7 @@ export const register = async (req: Request, res: Response) => {
     if (user.email) {
       sendWelcomeEmail(user.email, user.name, 'Patient').catch(err => console.warn('[Welcome Email Patient Error]', err.message));
     }
+    sendWelcomeNotification(user.id, user.name).catch(err => console.warn('[Welcome Push Patient Error]', err.message));
 
     const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '30d' });
 
@@ -866,9 +870,25 @@ export const checkMobile = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Mobile number is required' });
     }
 
-    const user = await prisma.user.findUnique({ where: { mobile } });
+    // Normalize so +91 / 91 / spaces still match stored forms
+    const cleanMobile = String(mobile).replace(/\D/g, '').slice(-10);
+    if (cleanMobile.length !== 10) {
+      return res.status(400).json({ error: 'Please enter a valid 10-digit mobile number' });
+    }
 
-    return res.json({ exists: !!user });
+    const user = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { mobile: cleanMobile },
+          { mobile: String(mobile).trim() },
+          { mobile: `+91${cleanMobile}` },
+          { mobile: `91${cleanMobile}` },
+        ],
+      },
+      select: { id: true, mobile: true },
+    });
+
+    return res.json({ exists: !!user, mobile: cleanMobile });
   } catch (error: any) {
     console.error('Check mobile error:', error);
     res.status(500).json({ error: 'Failed to check mobile number', details: error.message });
@@ -1442,17 +1462,24 @@ export const sendOtp = async (req: Request, res: Response) => {
 
     // 1. Find user by mobile number
     const existingUser = await prisma.user.findFirst({
-      where: { OR: [{ mobile: cleanMobile }, { mobile: String(mobile).trim() }] }
+      where: {
+        OR: [
+          { mobile: cleanMobile },
+          { mobile: String(mobile).trim() },
+          { mobile: `+91${cleanMobile}` },
+          { mobile: `91${cleanMobile}` },
+        ],
+      },
     });
 
-    // 2. Cooldown check (Rate limiting: 30 seconds)
+    // 2. Cooldown check (Rate limiting: 10 seconds — Firebase owns SMS delivery)
     const memRecord = mobileOtpStore.get(cleanMobile);
     const lastSentTime = existingUser?.otpLastSentAt?.getTime() || memRecord?.lastSentAt?.getTime();
     if (lastSentTime) {
       const diffSec = (Date.now() - lastSentTime) / 1000;
-      if (diffSec < 30) {
+      if (diffSec < 10) {
         return res.status(429).json({
-          error: `Please wait ${Math.ceil(30 - diffSec)} seconds before requesting a new OTP.`,
+          error: `Please wait ${Math.ceil(10 - diffSec)} seconds before requesting a new OTP.`,
         });
       }
     }
@@ -1655,8 +1682,9 @@ export const registerWithFirebaseToken = async (req: Request, res: Response) => 
   try {
     const { idToken, name, email, referralCode } = req.body;
 
-    if (!idToken || !name || !email) {
-      return res.status(400).json({ error: 'idToken, name, and email are required' });
+    // Email is optional on the app Create Account form — only idToken + name required
+    if (!idToken || !name || !String(name).trim()) {
+      return res.status(400).json({ error: 'idToken and name are required' });
     }
 
     if (!firebaseAuth) {
@@ -1664,8 +1692,9 @@ export const registerWithFirebaseToken = async (req: Request, res: Response) => 
     }
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    const cleanEmail = String(email).trim().toLowerCase();
-    if (!emailRegex.test(cleanEmail)) {
+    const rawEmail = email == null ? '' : String(email).trim().toLowerCase();
+    const cleanEmail = rawEmail || null;
+    if (cleanEmail && !emailRegex.test(cleanEmail)) {
       return res.status(400).json({ error: 'Invalid email address format' });
     }
 
@@ -1696,13 +1725,15 @@ export const registerWithFirebaseToken = async (req: Request, res: Response) => 
           { mobile },
           { mobile: verifiedPhone },
           { mobile: `+91${mobile}` },
-          { email: cleanEmail },
+          { mobile: `91${mobile}` },
+          ...(cleanEmail ? [{ email: cleanEmail }] : []),
         ],
       },
     });
 
     if (existingUser) {
-      if (existingUser.mobile === mobile || existingUser.mobile === verifiedPhone || existingUser.mobile === `+91${mobile}`) {
+      const existingDigits = String(existingUser.mobile || '').replace(/\D/g, '').slice(-10);
+      if (existingDigits === mobile) {
         return res.status(400).json({ error: 'Mobile number already registered. Please login instead.' });
       }
       return res.status(400).json({ error: 'Email already in use. Try a different email.' });
@@ -1736,8 +1767,8 @@ export const registerWithFirebaseToken = async (req: Request, res: Response) => 
         email: cleanEmail,
         mobile,
         password: hashedPassword,
-        emailVerified: true,
-        emailVerifiedAt: new Date(),
+        emailVerified: Boolean(cleanEmail),
+        emailVerifiedAt: cleanEmail ? new Date() : null,
         referralCode: userReferralCode,
         referredById,
         isFirstTestFreeEligible,
@@ -1770,6 +1801,7 @@ export const registerWithFirebaseToken = async (req: Request, res: Response) => 
     if (user.email) {
       sendWelcomeEmail(user.email, user.name, 'Patient').catch(err => console.warn('[Welcome Email Patient Error]', err.message));
     }
+    sendWelcomeNotification(user.id, user.name).catch(err => console.warn('[Welcome Push Patient Error]', err.message));
 
     const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '15d' });
 
