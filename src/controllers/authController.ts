@@ -1462,7 +1462,14 @@ export const sendOtp = async (req: Request, res: Response) => {
 
     // 1. Find user by mobile number
     const existingUser = await prisma.user.findFirst({
-      where: { OR: [{ mobile: cleanMobile }, { mobile: String(mobile).trim() }] }
+      where: {
+        OR: [
+          { mobile: cleanMobile },
+          { mobile: String(mobile).trim() },
+          { mobile: `+91${cleanMobile}` },
+          { mobile: `91${cleanMobile}` },
+        ],
+      },
     });
 
     // 2. Cooldown check (Rate limiting: 10 seconds — Firebase owns SMS delivery)
