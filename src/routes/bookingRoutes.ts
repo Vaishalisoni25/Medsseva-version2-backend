@@ -17,6 +17,7 @@ import {
   updateLabStatus,
   sendBookingInvoice,
   createWalkinBooking,
+  acceptDispatchBooking,
 } from '../controllers/bookingController';
 import { authenticate, authorizeRoles } from '../middlewares/authMiddleware';
 import { strictLimiter } from '../middlewares/rateLimiter';
@@ -41,6 +42,7 @@ router.patch('/:id/accept-lab', authorizeRoles('ADMIN', 'SUPER_ADMIN', 'PATHOLOG
 router.patch('/:id/reject-lab', authorizeRoles('ADMIN', 'SUPER_ADMIN', 'PATHOLOGIST'), rejectLabBooking);
 router.patch('/:id/patient-reached', authorizeRoles('USER', 'ADMIN', 'SUPER_ADMIN', 'PATHOLOGIST'), patientReachedLab);
 router.patch('/:id/update-lab-status', authorizeRoles('ADMIN', 'SUPER_ADMIN', 'PATHOLOGIST'), updateLabStatus);
+router.patch('/:id/accept-dispatch', authorizeRoles('ADMIN', 'SUPER_ADMIN', 'PATHOLOGIST'), acceptDispatchBooking);
 router.patch('/:id/collect-sample', authorizeRoles('ADMIN', 'PATHOLOGIST', 'EXECUTIVE'), collectSample);
 router.get('/:id/collection-otp', generateCollectionOtp);
 router.post('/:id/verify-otp', verifyCollectionOtp);

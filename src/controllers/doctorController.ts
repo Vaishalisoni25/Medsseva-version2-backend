@@ -393,58 +393,87 @@ export const deleteDoctor = async (req: AuthRequest, res: Response) => {
   }
 };
 
-export const createDoctorSamplePickupRequest = async (req: AuthRequest, res: Response) => {
-  try {
-    const doctorUserId = req.user?.id;
-    if (!doctorUserId) {
-      return res.status(401).json({ error: 'Unauthorized Doctor request' });
-    }
-    const { patientName, patientMobile, patientAge, patientGender, testIds = [], address, latitude, longitude, notes } = req.body;
-
-    if (!patientName || !patientMobile) {
-      return res.status(400).json({ error: 'Patient name and mobile are required for sample pickup request' });
-    }
-
-    const doctor = await (prisma as any).doctor.findFirst({
-      where: { OR: [{ userId: doctorUserId }, { id: doctorUserId }] },
-    });
-
-    let totalBilled = 0;
-    if (Array.isArray(testIds) && testIds.length > 0) {
-      const tests = await prisma.test.findMany({ where: { id: { in: testIds } } });
-      totalBilled = tests.reduce((sum, t) => sum + (t.price || 0), 0);
-    }
-
-    const bookingCode = `DOC-PU-${Date.now().toString().slice(-6)}`;
-
-    // Create Home Collection booking entering main distribution engine (WAITING_FOR_PARTNER)
-    const booking = await prisma.booking.create({
-      data: {
-        bookingCode,
-        userId: doctorUserId,
-        referringDoctorId: doctor?.id || null,
-        branchId: doctor?.branchId || null,
-        patientName,
-        patientMobile,
-        patientAge: patientAge ? Number(patientAge) : null,
-        patientGender: patientGender || null,
-        scheduledDate: new Date(),
-        scheduledSlot: 'ASAP Pickup',
-        totalPaid: totalBilled,
-        collectionMode: 'HOME',
-        status: 'WAITING_FOR_PARTNER',
-        partnerNote: notes ? `Doctor Pickup Request: ${notes}` : 'Doctor Clinic Sample Pickup Request',
-        addressId: address || 'Doctor Clinic Location',
-        ...(Array.isArray(testIds) && testIds.length > 0 ? {
-          tests: {
-            create: testIds.map((tid: string) => ({ testId: tid }))
-          }
-        } : {})
-      },
-      include: {
-        tests: { include: { test: true } }
+  export const createDoctorSamplePickupRequest = async (req: AuthRequest, res: Response) => {
+    try {
+      console.log('--- PICKUP REQUEST ---', JSON.stringify(req.body));
+      const doctorUserId = req.user?.id;
+      if (!doctorUserId) {
+        return res.status(401).json({ error: 'Unauthorized Doctor request' });
       }
-    });
+      const { patientName, patientMobile, patientAge, patientGender, testIds = [], packageIds = [], address, latitude, longitude, notes } = req.body;
+  
+      if (!patientName || !patientMobile) {
+        return res.status(400).json({ error: 'Patient name and mobile are required for sample pickup request' });
+      }
+  
+      const doctor = await (prisma as any).doctor.findFirst({
+        where: { OR: [{ userId: doctorUserId }, { id: doctorUserId }] },
+      });
+  
+      let totalBilled = 0;
+      if (Array.isArray(testIds) && testIds.length > 0) {
+        const tests = await prisma.test.findMany({ where: { id: { in: testIds } } });
+        totalBilled += tests.reduce((sum, t) => sum + (t.price || 0), 0);
+      }
+      if (Array.isArray(packageIds) && packageIds.length > 0) {
+        const pkgs = await prisma.healthPackage.findMany({ where: { id: { in: packageIds } } });
+        totalBilled += pkgs.reduce((sum, p) => sum + (p.price || 0), 0);
+      }
+  
+      let finalAddressId = address || 'Doctor Clinic Location';
+      if (latitude && longitude && finalAddressId !== 'Doctor Clinic Location') {
+        // Create an address record for accurate radius calculations
+        const newAddr = await prisma.address.create({
+          data: {
+            userId: doctorUserId,
+            type: 'CLINIC',
+            line1: finalAddressId,
+            city: 'Unknown',
+            state: 'Unknown',
+            pincode: '000000',
+            latitude: Number(latitude),
+            longitude: Number(longitude),
+          }
+        });
+        finalAddressId = newAddr.id;
+      }
+  
+      const bookingCode = `DOC-PU-${Date.now().toString().slice(-6)}`;
+  
+      // Create Home Collection booking entering main distribution engine (WAITING_FOR_PARTNER)
+      const booking = await prisma.booking.create({
+        data: {
+          bookingCode,
+          userId: doctorUserId,
+          referringDoctorId: doctor?.id || null,
+          branchId: doctor?.branchId || null,
+          patientName,
+          patientMobile,
+          patientAge: patientAge ? Number(patientAge) : null,
+          patientGender: patientGender || null,
+          scheduledDate: new Date(),
+          scheduledSlot: 'ASAP Pickup',
+          totalPaid: totalBilled,
+          collectionMode: 'HOME',
+          status: 'WAITING_FOR_PARTNER',
+          partnerNote: notes ? `Doctor Pickup Request: ${notes}` : 'Doctor Clinic Sample Pickup Request',
+          addressId: finalAddressId,
+          ...(Array.isArray(testIds) && testIds.length > 0 ? {
+            tests: {
+              create: testIds.map((tid: string) => ({ testId: tid }))
+            }
+          } : {}),
+          ...(Array.isArray(packageIds) && packageIds.length > 0 ? {
+            packages: {
+              create: packageIds.map((pid: string) => ({ packageId: pid }))
+            }
+          } : {})
+        },
+        include: {
+          tests: { include: { test: true } },
+          packages: { include: { package: true } }
+        }
+      });
 
     res.status(201).json({
       message: 'Sample pickup request created successfully and broadcast to nearby collection partners',
@@ -462,7 +491,7 @@ export const doctorDirectSampleHandover = async (req: AuthRequest, res: Response
     if (!doctorUserId) {
       return res.status(401).json({ error: 'Unauthorized Doctor request' });
     }
-    const { targetBranchId, patientName, patientMobile, patientAge, patientGender, testIds = [], sampleType, notes } = req.body;
+    const { targetBranchId, patientName, patientMobile, patientAge, patientGender, testIds = [], packageIds = [], address, latitude, longitude, sampleType, notes } = req.body;
 
     if (!targetBranchId || !patientName) {
       return res.status(400).json({ error: 'Target branch ID and patient name are required' });
@@ -475,7 +504,28 @@ export const doctorDirectSampleHandover = async (req: AuthRequest, res: Response
     let totalBilled = 0;
     if (Array.isArray(testIds) && testIds.length > 0) {
       const tests = await prisma.test.findMany({ where: { id: { in: testIds } } });
-      totalBilled = tests.reduce((sum, t) => sum + (t.price || 0), 0);
+      totalBilled += tests.reduce((sum, t) => sum + (t.price || 0), 0);
+    }
+    if (Array.isArray(packageIds) && packageIds.length > 0) {
+      const pkgs = await prisma.healthPackage.findMany({ where: { id: { in: packageIds } } });
+      totalBilled += pkgs.reduce((sum, p) => sum + (p.price || 0), 0);
+    }
+
+    let finalAddressId = address || 'Direct Lab Handover';
+    if (latitude && longitude && finalAddressId !== 'Direct Lab Handover') {
+      const newAddr = await prisma.address.create({
+        data: {
+          userId: doctorUserId,
+          type: 'CLINIC',
+          line1: finalAddressId,
+          city: 'Unknown',
+          state: 'Unknown',
+          pincode: '000000',
+          latitude: Number(latitude),
+          longitude: Number(longitude),
+        }
+      });
+      finalAddressId = newAddr.id;
     }
 
     const bookingCode = `DOC-HO-${Date.now().toString().slice(-6)}`;
@@ -496,15 +546,21 @@ export const doctorDirectSampleHandover = async (req: AuthRequest, res: Response
         branchId: targetBranchId,
         status: 'DELIVERED_TO_LAB',
         partnerNote: notes ? `Doctor Direct Handover: ${notes}` : 'Direct Doctor Sample Handover',
-        addressId: 'Direct Lab Handover',
+        addressId: finalAddressId,
         ...(Array.isArray(testIds) && testIds.length > 0 ? {
           tests: {
             create: testIds.map((tid: string) => ({ testId: tid }))
           }
+        } : {}),
+        ...(Array.isArray(packageIds) && packageIds.length > 0 ? {
+          packages: {
+            create: packageIds.map((pid: string) => ({ packageId: pid }))
+          }
         } : {})
       },
       include: {
-        tests: { include: { test: true } }
+        tests: { include: { test: true } },
+        packages: { include: { package: true } }
       }
     });
 

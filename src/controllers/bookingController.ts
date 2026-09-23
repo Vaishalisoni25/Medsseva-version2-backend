@@ -814,7 +814,7 @@ export const rejectLabBooking = async (req: any, res: Response) => {
     const booking = await prisma.booking.findUnique({ where: { id } });
     if (!booking) return res.status(404).json({ error: 'Booking not found.' });
     if (booking.collectionMode !== 'LAB') return res.status(400).json({ error: 'Only valid for Lab Visit bookings.' });
-    if (booking.status !== 'WAITING_FOR_ASSIGNMENT' && booking.status !== 'PENDING') return res.status(400).json({ error: 'Booking already reviewed.' });
+    if (booking.status !== 'WAITING_FOR_ASSIGNMENT' && booking.status !== 'PENDING' && booking.status !== 'DELIVERED_TO_LAB') return res.status(400).json({ error: 'Booking already reviewed.' });
 
     const updated = await prisma.booking.update({
       where: { id },
@@ -1097,3 +1097,33 @@ export const createWalkinBooking = async (req: any, res: Response) => {
     res.status(500).json({ error: 'Failed to create walk-in patient booking', details: error.message });
   }
 };
+
+export const acceptDispatchBooking = async (req: any, res: Response) => {
+  try {
+    const { id } = req.params;
+    if (!['ADMIN', 'SUPER_ADMIN', 'PATHOLOGIST'].includes(req.user.role)) return res.status(403).json({ error: 'Only Lab Admin can accept bookings.' });
+    const booking = await prisma.booking.findUnique({ where: { id }, include: { sample: true } });
+    if (!booking) return res.status(404).json({ error: 'Booking not found.' });
+    if (booking.status !== 'DELIVERED_TO_LAB' || booking.collectionMode !== 'LAB') return res.status(400).json({ error: 'Booking is not a valid dispatch booking.' });
+
+    const updated = await prisma.booking.update({
+      where: { id },
+      data: { status: 'PROCESSING', labReviewedAt: new Date(), labReviewedById: req.user.id },
+    });
+
+    if (booking.sample) {
+      await prisma.sample.update({
+        where: { id: booking.sample.id },
+        data: { status: 'PROCESSING', processingStartedAt: new Date() }
+      });
+    }
+
+    await prisma.bookingStatusLog.create({ data: { bookingId: id, status: 'PROCESSING', note: 'Doctor Dispatch booking accepted for processing', updatedBy: req.user.id } });
+
+    sendNotificationToUser(booking.userId, 'Dispatch Accepted', 'Your dispatch request has been accepted and is now processing.', 'BOOKING_ACCEPTED', { bookingId: id }).catch(console.error);
+
+    res.json(updated);
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to accept dispatch booking' });
+  }
+};

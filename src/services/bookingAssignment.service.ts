@@ -36,7 +36,7 @@ export function isBookingWithinCollectorRadius(
   radiusKm = DEFAULT_BOOKING_RADIUS_KM
 ): boolean {
   if (!hasValidCoordinates(booking.latitude, booking.longitude)) {
-    return false;
+    return true; // Allow bookings without GPS (e.g. manual doctor bookings) to be broadcasted
   }
   return isWithinServiceRadius(
     booking.latitude,
