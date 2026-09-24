@@ -8,6 +8,7 @@ import {
   getLabWiseCollections,
   updateCollectionPartnerStatus,
   creditCommissionPayout,
+  deleteCollectionPartner,
 } from '../controllers/collectionPartnerController';
 
 const router = Router();
@@ -21,5 +22,6 @@ router.get('/lab-wise', getLabWiseCollections);
 router.get('/:id', getCollectionPartnerDetails);
 router.patch('/:id/status', updateCollectionPartnerStatus);
 router.patch('/commissions/payout', creditCommissionPayout);
+router.delete('/:id', deleteCollectionPartner);
 
 export default router;

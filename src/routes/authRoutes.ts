@@ -144,7 +144,7 @@ router.delete('/users/:id', authenticate, authorizeRoles('SUPER_ADMIN'), deleteP
 router.get('/partners', authenticate, authorizeRoles('ADMIN', 'SUPER_ADMIN'), getPartners);
 router.post('/partners', authenticate, authorizeRoles('ADMIN', 'SUPER_ADMIN'), createPartnerByAdmin);
 router.put('/partners/:id', authenticate, authorizeRoles('ADMIN', 'SUPER_ADMIN'), updatePartnerByAdmin);
-router.delete('/partners/:id', authenticate, authorizeRoles('SUPER_ADMIN'), deletePartnerByAdmin);
+router.delete('/partners/:id', authenticate, authorizeRoles('ADMIN', 'SUPER_ADMIN'), deletePartnerByAdmin);
 router.get('/partners/:id/details', authenticate, authorizeRoles('ADMIN', 'SUPER_ADMIN'), getPartnerDetails);
 router.patch('/partners/:id/approval', authenticate, authorizeRoles('ADMIN', 'SUPER_ADMIN'), updatePartnerApproval);
 router.patch('/partners/:id/documents/:docId', authenticate, authorizeRoles('ADMIN', 'SUPER_ADMIN'), updatePartnerDocumentStatusAdmin);

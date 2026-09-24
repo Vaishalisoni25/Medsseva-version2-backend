@@ -1283,8 +1283,25 @@ export const getPartners = async (req: Request, res: Response) => {
         { user: { adminUser: { branchId: { in: targetBranchIds } } } }
       ];
     }
+
+    // Exclude Phlebotomists / Collectors / Executives from Lab Partners list
+    // (They are managed under Collection Partner Management)
+    where.AND = [
+      ...(where.AND || []),
+      {
+        NOT: {
+          OR: [
+            { role: { contains: 'PHLEBO', mode: 'insensitive' } },
+            { role: 'EXECUTIVE' },
+            { labName: { contains: 'PHLEBOTOMIST', mode: 'insensitive' } },
+            { user: { role: 'EXECUTIVE' } }
+          ]
+        }
+      }
+    ];
+
     const partners = await prisma.pathologyPartner.findMany({
-      where: Object.keys(where).length > 0 ? where : undefined,
+      where,
       include: {
         user: {
           select: {
@@ -1930,19 +1947,89 @@ export const createPartnerByAdmin = async (req: Request, res: Response) => {
 export const deletePartnerByAdmin = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const partner = await prisma.pathologyPartner.findUnique({ where: { id } });
+    const partner = await prisma.pathologyPartner.findFirst({
+      where: {
+        OR: [
+          { id },
+          { userId: id }
+        ]
+      },
+      include: { user: true }
+    });
     if (!partner) return res.status(404).json({ error: 'Partner not found' });
 
-    // Delete associated adminUser if exists
-    await prisma.adminUser.deleteMany({ where: { userId: partner.userId } });
+    const partnerId = partner.id;
+    const userId = partner.userId;
 
-    // Delete partner documents
-    await prisma.partnerDocument.deleteMany({ where: { partnerId: id } });
+    // 1. Unlink bookings where this partner was assigned
+    await prisma.booking.updateMany({
+      where: { assignedPartnerId: partnerId },
+      data: { assignedPartnerId: null }
+    }).catch(err => console.warn('Unlink bookings warning:', err.message));
 
-    // Delete pathology partner
-    await prisma.pathologyPartner.delete({ where: { id } });
+    // 2. Delete / Unlink sample deliveries
+    await prisma.sampleDelivery.deleteMany({
+      where: { partnerId: partnerId }
+    }).catch(err => console.warn('Delete sampleDelivery warning:', err.message));
 
-    res.json({ message: 'Partner deleted successfully' });
+    // 3. Delete referral commissions
+    await prisma.referralCommission.deleteMany({
+      where: { partnerId: partnerId }
+    }).catch(err => console.warn('Delete referralCommission warning:', err.message));
+
+    // 4. Delete booking rejections
+    await prisma.bookingRejection.deleteMany({
+      where: { partnerId: partnerId }
+    }).catch(err => console.warn('Delete bookingRejection warning:', err.message));
+
+    // 5. Delete partner ratings
+    await prisma.partnerRating.deleteMany({
+      where: { partnerId: partnerId }
+    }).catch(err => console.warn('Delete partnerRating warning:', err.message));
+
+    // 6. Delete wallet transactions
+    await prisma.partnerWalletTransaction.deleteMany({
+      where: { partnerId: partnerId }
+    }).catch(err => console.warn('Delete partnerWalletTransaction warning:', err.message));
+
+    // 7. Unlink doctors
+    await prisma.doctor.updateMany({
+      where: { partnerId: partnerId },
+      data: { partnerId: null }
+    }).catch(err => console.warn('Unlink doctor warning:', err.message));
+
+    // 8. Delete associated adminUser
+    if (userId) {
+      await prisma.adminUser.deleteMany({
+        where: {
+          OR: [
+            { userId },
+            { partnerId }
+          ]
+        }
+      }).catch(err => console.warn('Delete adminUser warning:', err.message));
+    }
+
+    // 9. Delete partner documents
+    await prisma.partnerDocument.deleteMany({
+      where: { partnerId }
+    }).catch(err => console.warn('Delete partnerDocument warning:', err.message));
+
+    // 10. Delete pathology partner
+    await prisma.pathologyPartner.delete({
+      where: { id: partnerId }
+    });
+
+    // 11. Delete associated User record if present
+    if (userId) {
+      await prisma.notification.deleteMany({ where: { userId } }).catch(() => {});
+      await prisma.deviceToken.deleteMany({ where: { userId } }).catch(() => {});
+      await prisma.user.delete({ where: { id: userId } }).catch(err => {
+        console.warn('Could not delete user record:', err.message);
+      });
+    }
+
+    res.json({ success: true, message: 'Partner deleted successfully' });
   } catch (error: any) {
     console.error('Delete partner error:', error);
     res.status(500).json({ error: 'Failed to delete partner', details: error.message });

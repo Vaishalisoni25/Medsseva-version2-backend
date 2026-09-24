@@ -105,13 +105,17 @@ export const getCollectionPartners = async (req: Request, res: Response) => {
       const adminUser = e.adminUser;
       const partner = e.pathologyPartner;
 
-      const isEmployee = !!(
-        adminUser && (
-          adminUser.userType === 'EMPLOYEE' ||
+      // In-House Staff Phlebotomist = Created from Admin Panel as Staff / Employee (has adminUser with STAFF/EMPLOYEE or branch assignment)
+      // App Freelancer Phlebotomist = Self-registered via Mobile App (adminUser is null or userType is 'FREELANCER')
+      const isEmployee = Boolean(
+        adminUser &&
+        adminUser.userType !== 'FREELANCER' && (
           adminUser.userType === 'STAFF' ||
-          (adminUser.branchId && !partner) ||
-          (adminUser.designation && /staff|employee/i.test(adminUser.designation))
-        ) && !partner
+          adminUser.userType === 'EMPLOYEE' ||
+          (adminUser.designation && /phlebotomist|collector|staff|employee/i.test(adminUser.designation)) ||
+          adminUser.branchId ||
+          adminUser.partnerId
+        )
       );
       const phlebotomistType = isEmployee ? 'EMPLOYEE' : 'FREELANCER';
 
@@ -222,14 +226,14 @@ export const getCollectionPartnerDetails = async (req: Request, res: Response) =
     });
 
     const adminUser = user.adminUser;
-    const isEmployeeStaff = !!(
-      adminUser && (
+    const isEmployeeStaff = Boolean(
+      adminUser &&
+      adminUser.userType !== 'FREELANCER' && (
         adminUser.userType === 'EMPLOYEE' ||
         adminUser.userType === 'STAFF' ||
+        (adminUser.designation && /phlebotomist|collector|staff|employee/i.test(adminUser.designation)) ||
         adminUser.branchId ||
-        adminUser.role?.slug === 'executive' ||
-        (adminUser.designation && /phlebotomist|collector|phlebo|staff|employee/i.test(adminUser.designation)) ||
-        (adminUser.department && /phlebotom|sample collection/i.test(adminUser.department))
+        adminUser.partnerId
       )
     );
 
@@ -477,6 +481,7 @@ export const updateCollectionPartnerStatus = async (req: Request, res: Response)
           roleId: execRole.id,
           department: 'Collection Operations',
           designation: 'Phlebotomist',
+          userType: 'FREELANCER',
           isActive,
           ...(branchId !== undefined ? { branchId: branchId || null } : {})
         }
@@ -535,5 +540,98 @@ export const creditCommissionPayout = async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('Error in creditCommissionPayout:', error);
     res.status(500).json({ error: 'Failed to credit commission', details: error.message });
+  }
+};
+
+export const deleteCollectionPartner = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    // Find user by id or by associated pathologyPartner / adminUser id
+    const user = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { id },
+          { pathologyPartner: { id } },
+          { adminUser: { id } }
+        ]
+      },
+      include: {
+        pathologyPartner: true,
+        adminUser: true,
+      }
+    });
+
+    if (!user) {
+      // Check if id directly matches pathologyPartner
+      const directPartner = await prisma.pathologyPartner.findUnique({ where: { id } });
+      if (directPartner) {
+        await prisma.booking.updateMany({ where: { assignedPartnerId: id }, data: { assignedPartnerId: null } }).catch(() => {});
+        await prisma.partnerDocument.deleteMany({ where: { partnerId: id } }).catch(() => {});
+        await prisma.referralCommission.deleteMany({ where: { partnerId: id } }).catch(() => {});
+        await prisma.bookingRejection.deleteMany({ where: { partnerId: id } }).catch(() => {});
+        await prisma.sampleDelivery.deleteMany({ where: { partnerId: id } }).catch(() => {});
+        await prisma.partnerRating.deleteMany({ where: { partnerId: id } }).catch(() => {});
+        await prisma.partnerWalletTransaction.deleteMany({ where: { partnerId: id } }).catch(() => {});
+        await prisma.pathologyPartner.delete({ where: { id } });
+        return res.json({ success: true, message: 'Collection partner deleted successfully' });
+      }
+      return res.status(404).json({ error: 'Phlebotomist not found' });
+    }
+
+    const userId = user.id;
+
+    // 1. Unlink assigned collections and payment receiver in Bookings
+    await prisma.booking.updateMany({
+      where: { assignedExecutiveId: userId },
+      data: { assignedExecutiveId: null }
+    }).catch(err => console.warn('Unlink assigned collections warning:', err.message));
+
+    await prisma.booking.updateMany({
+      where: { paymentReceivedById: userId },
+      data: { paymentReceivedById: null }
+    }).catch(err => console.warn('Unlink paymentReceived warning:', err.message));
+
+    // 2. If user has pathologyPartner record (or partnerId exists)
+    if (user.pathologyPartner) {
+      const pId = user.pathologyPartner.id;
+      await prisma.booking.updateMany({ where: { assignedPartnerId: pId }, data: { assignedPartnerId: null } }).catch(() => {});
+      await prisma.partnerDocument.deleteMany({ where: { partnerId: pId } }).catch(() => {});
+      await prisma.referralCommission.deleteMany({ where: { partnerId: pId } }).catch(() => {});
+      await prisma.bookingRejection.deleteMany({ where: { partnerId: pId } }).catch(() => {});
+      await prisma.sampleDelivery.deleteMany({ where: { partnerId: pId } }).catch(() => {});
+      await prisma.partnerRating.deleteMany({ where: { partnerId: pId } }).catch(() => {});
+      await prisma.partnerWalletTransaction.deleteMany({ where: { partnerId: pId } }).catch(() => {});
+      await prisma.pathologyPartner.deleteMany({ where: { id: pId } }).catch(() => {});
+    }
+
+    // 3. Delete / Unlink all User-level foreign keys
+    await prisma.address.deleteMany({ where: { userId } }).catch(() => {});
+    await prisma.auditLog.deleteMany({ where: { userId } }).catch(() => {});
+    await prisma.notification.deleteMany({ where: { userId } }).catch(() => {});
+    await prisma.deviceToken.deleteMany({ where: { userId } }).catch(() => {});
+    await prisma.bookingIntent.deleteMany({ where: { userId } }).catch(() => {});
+    await prisma.paymentMethod.deleteMany({ where: { userId } }).catch(() => {});
+    await prisma.upiMethod.deleteMany({ where: { userId } }).catch(() => {});
+    await prisma.conversation.deleteMany({ where: { userId } }).catch(() => {});
+    await prisma.family.deleteMany({ where: { userId } }).catch(() => {});
+    await prisma.prescription.deleteMany({ where: { userId } }).catch(() => {});
+    await prisma.walletTransaction.deleteMany({ where: { userId } }).catch(() => {});
+    await prisma.expense.updateMany({ where: { createdById: userId }, data: { createdById: null } }).catch(() => {});
+    await prisma.partnerRating.deleteMany({ where: { userId } }).catch(() => {});
+    await prisma.adminUser.deleteMany({ where: { userId } }).catch(() => {});
+
+    // Delete any personal bookings created by this user as a patient
+    await prisma.booking.deleteMany({ where: { userId } }).catch(() => {});
+
+    // 4. Delete the User record
+    await prisma.user.delete({
+      where: { id: userId }
+    });
+
+    res.json({ success: true, message: 'Phlebotomist deleted successfully' });
+  } catch (error: any) {
+    console.error('Error in deleteCollectionPartner:', error);
+    res.status(500).json({ error: 'Failed to delete collection partner', details: error.message });
   }
 };
