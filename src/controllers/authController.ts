@@ -248,6 +248,41 @@ export const registerPartner = async (req: Request, res: Response) => {
     }
     sendWelcomeNotification(user.id, user.name).catch(err => console.warn('[Welcome Push Partner Error]', err.message));
 
+    // STRICT SECURITY RULE:
+    // Only true Diagnostic LAB_PARTNER can have a Lab Branch & AdminUser.
+    // Phlebotomists, Freelance Sample Collectors, and Phlebo roles are STRICTLY forbidden from Admin access.
+    const partnerRoleStr = String(partnerRole || '').toUpperCase();
+    const isPhlebotomist = partnerRoleStr.includes('PHLEBO') || partnerRoleStr.includes('COLLECTOR');
+    const isLabPartner = !isPhlebotomist && (partnerRoleStr === 'LAB_PARTNER' || partnerRoleStr.includes('LAB'));
+
+    if (isLabPartner) {
+      const createdBranchId = await ensurePartnerBranchAndAdminUser({
+        userId: user.id,
+        partnerId: partner.id,
+        labName: partner.labName,
+        currentBranchId: resolvedBranchId,
+        partnerCode,
+        address: partner.address,
+        city: partner.city,
+        state: partner.state,
+        pincode: partner.pincode,
+        mobile: cleanMobile,
+        email: cleanEmail,
+        isActive: false, // Inactive until Super Admin verifies and sets password
+        grantAdminAccess: true,
+      }).catch(err => {
+        console.warn('[Auto-create partner branch & adminUser non-fatal]:', err.message);
+        return null;
+      });
+
+      if (createdBranchId && createdBranchId !== partner.branchId) {
+        await prisma.pathologyPartner.update({
+          where: { id: partner.id },
+          data: { branchId: createdBranchId },
+        }).catch(() => {});
+      }
+    }
+
     res.status(201).json({
       message: 'Partner onboarding application submitted. Awaiting admin approval.',
       pendingApproval: true,
@@ -1264,7 +1299,25 @@ export const getPartners = async (req: Request, res: Response) => {
                 roleId: true,
                 branchId: true,
                 isActive: true,
-                role: { select: { id: true, name: true, slug: true } },
+                role: {
+                  select: {
+                    id: true,
+                    name: true,
+                    slug: true,
+                    permissions: {
+                      select: {
+                        permissionId: true,
+                        permission: {
+                          select: {
+                            id: true,
+                            module: true,
+                            action: true,
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
                 branch: { select: { id: true, name: true, city: true } },
               },
             },
@@ -1363,7 +1416,25 @@ const PARTNER_ADMIN_INCLUDE = {
           roleId: true,
           branchId: true,
           isActive: true,
-          role: { select: { id: true, name: true, slug: true } },
+          role: {
+            select: {
+              id: true,
+              name: true,
+              slug: true,
+              permissions: {
+                select: {
+                  permissionId: true,
+                  permission: {
+                    select: {
+                      id: true,
+                      module: true,
+                      action: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
           branch: { select: { id: true, name: true, city: true } },
         },
       },
@@ -1371,6 +1442,101 @@ const PARTNER_ADMIN_INCLUDE = {
   },
   documents: true,
 };
+
+/**
+ * Ensures a dedicated 'Partner Lab Admin' role exists with default permissions
+ * for Dashboard, Patients, Doctors, Staff, Bookings, Expenses, Reports, Tests, Packages, Commissions, Prescriptions.
+ */
+async function getOrCreatePartnerAdminRole(
+  customPermissionIds?: string[],
+  partnerLabName?: string,
+  partnerId?: string
+): Promise<string> {
+  // If specific custom permission IDs are passed by Super Admin, create or update a dedicated role for this partner lab
+  if (customPermissionIds && Array.isArray(customPermissionIds) && customPermissionIds.length > 0 && partnerId) {
+    const customSlug = `partner_${partnerId.replace(/-/g, '_').slice(0, 16)}`;
+    const roleName = partnerLabName ? `Partner - ${partnerLabName.slice(0, 30)}` : `Partner Admin (${partnerId.slice(0, 6)})`;
+
+    const existingCustomRole = await prisma.adminRole.findUnique({
+      where: { slug: customSlug },
+    });
+
+    if (existingCustomRole) {
+      await prisma.rolePermission.deleteMany({ where: { roleId: existingCustomRole.id } });
+      await prisma.adminRole.update({
+        where: { id: existingCustomRole.id },
+        data: {
+          name: roleName,
+          permissions: {
+            create: customPermissionIds.map((pid: string) => ({ permissionId: pid })),
+          },
+        },
+      });
+      return existingCustomRole.id;
+    } else {
+      const newRole = await prisma.adminRole.create({
+        data: {
+          name: roleName,
+          slug: customSlug,
+          description: `Custom permissions role for ${partnerLabName || 'Partner Lab'}`,
+          permissions: {
+            create: customPermissionIds.map((pid: string) => ({ permissionId: pid })),
+          },
+        },
+      });
+      return newRole.id;
+    }
+  }
+
+  // Otherwise, ensure the standard Partner Lab Admin role exists
+  let defaultRole = await prisma.adminRole.findUnique({
+    where: { slug: 'partner_admin' },
+    include: { permissions: true },
+  });
+
+  if (!defaultRole) {
+    const defaultModules = [
+      'dashboard',
+      'users',
+      'patients',
+      'doctors',
+      'staff',
+      'bookings',
+      'reports',
+      'lab_tests',
+      'tests',
+      'packages',
+      'payments',
+      'finance',
+      'commissions',
+      'prescriptions',
+      'cms',
+      'samples',
+    ];
+
+    const matchedPermissions = await prisma.permission.findMany({
+      where: {
+        module: { in: defaultModules },
+        action: { in: ['view', 'create', 'edit', 'update', 'approve', 'assign'] },
+      },
+    });
+
+    defaultRole = await prisma.adminRole.create({
+      data: {
+        name: 'Partner Lab Admin',
+        slug: 'partner_admin',
+        description: 'Default role for Tie-up Pathology Lab Partners managing their branch',
+        isSystem: true,
+        permissions: {
+          create: matchedPermissions.map(p => ({ permissionId: p.id })),
+        },
+      },
+      include: { permissions: true },
+    });
+  }
+
+  return defaultRole.id;
+}
 
 /**
  * Reusable helper: Ensures a PathologyPartner lab has a corresponding Branch
@@ -1389,9 +1555,36 @@ async function ensurePartnerBranchAndAdminUser(params: {
   mobile?: string | null;
   email?: string | null;
   adminRoleId?: string | null;
+  permissionIds?: string[] | null;
   isActive?: boolean;
   grantAdminAccess?: boolean;
 }): Promise<string> {
+  // STRICT SECURITY RULE: Under NO circumstances can a Phlebotomist, Freelance Collector, or Executive be given Branch Admin access!
+  const partnerCheck = await prisma.pathologyPartner.findUnique({
+    where: { id: params.partnerId },
+    select: { role: true, labName: true }
+  });
+  const partnerRoleStr = String(partnerCheck?.role || '').toUpperCase();
+  const labNameStr = String(partnerCheck?.labName || params.labName || '').toUpperCase();
+  if (
+    partnerRoleStr.includes('PHLEBO') ||
+    partnerRoleStr.includes('COLLECTOR') ||
+    partnerRoleStr === 'EXECUTIVE' ||
+    labNameStr.includes('PHLEBOTOMIST')
+  ) {
+    console.warn(`[SECURITY BLOCKED] ensurePartnerBranchAndAdminUser called for Phlebotomist (${params.partnerId}). Branch Admin creation strictly forbidden.`);
+    return params.currentBranchId || '';
+  }
+
+  const userCheck = await prisma.user.findUnique({
+    where: { id: params.userId },
+    select: { role: true }
+  });
+  if (userCheck?.role === 'EXECUTIVE' || String(userCheck?.role || '').toUpperCase().includes('PHLEBO')) {
+    console.warn(`[SECURITY BLOCKED] User ${params.userId} has role ${userCheck?.role}. Phlebotomist cannot be made Branch Admin.`);
+    return params.currentBranchId || '';
+  }
+
   let branchId = params.currentBranchId || null;
 
   // 1. If branchId exists, verify and sync
@@ -1439,11 +1632,10 @@ async function ensurePartnerBranchAndAdminUser(params: {
 
   // 3. Upsert AdminUser for this partner so they can access the Admin Panel
   let effectiveRoleId = params.adminRoleId;
-  if (!effectiveRoleId) {
-    const defaultRole = await prisma.adminRole.findFirst({
-      where: { slug: { in: ['branch_admin', 'admin', 'lab_department'] } },
-    }) || await prisma.adminRole.findFirst();
-    effectiveRoleId = defaultRole?.id;
+  if (params.permissionIds && params.permissionIds.length > 0) {
+    effectiveRoleId = await getOrCreatePartnerAdminRole(params.permissionIds, params.labName, params.partnerId);
+  } else if (!effectiveRoleId) {
+    effectiveRoleId = await getOrCreatePartnerAdminRole(undefined, params.labName, params.partnerId);
   }
 
   const shouldBeActive = params.isActive !== false && params.grantAdminAccess !== false;
@@ -1492,6 +1684,7 @@ export const updatePartnerByAdmin = async (req: Request, res: Response) => {
       password,
       adminRoleId,
       grantAdminAccess,
+      permissionIds,
     } = req.body;
 
     const partner = await prisma.pathologyPartner.findUnique({
@@ -1521,23 +1714,38 @@ export const updatePartnerByAdmin = async (req: Request, res: Response) => {
       });
     }
 
-    // 2. Ensure Branch & AdminUser via reusable helper
-    const targetBranchId = await ensurePartnerBranchAndAdminUser({
-      userId: partner.userId,
-      partnerId: partner.id,
-      labName: labName || partner.labName,
-      currentBranchId: partner.branchId,
-      partnerCode: partnerCode || partner.partnerCode,
-      address: address !== undefined ? address : partner.address,
-      city: city || partner.city,
-      state: state || partner.state,
-      pincode: pincode || partner.pincode,
-      mobile: userUpdate.mobile || partner.user?.mobile,
-      email: userUpdate.email || partner.user?.email,
-      adminRoleId: adminRoleId || undefined,
-      isActive: approvalStatus ? approvalStatus === 'APPROVED' : true,
-      grantAdminAccess: grantAdminAccess !== undefined ? Boolean(grantAdminAccess) : true,
-    });
+    // 2. Ensure Branch & AdminUser via reusable helper (ONLY for true Lab Partners, NEVER for Phlebotomists)
+    const partnerRoleUpper = String(partner.role || role || '').toUpperCase();
+    const isPhlebotomist = partnerRoleUpper.includes('PHLEBO') ||
+                           partnerRoleUpper.includes('COLLECTOR') ||
+                           partner.user?.role === 'EXECUTIVE' ||
+                           /phlebotomist/i.test(partner.labName || '');
+
+    let targetBranchId = partner.branchId;
+    if (!isPhlebotomist) {
+      targetBranchId = await ensurePartnerBranchAndAdminUser({
+        userId: partner.userId,
+        partnerId: partner.id,
+        labName: labName || partner.labName,
+        currentBranchId: partner.branchId,
+        partnerCode: partnerCode || partner.partnerCode,
+        address: address !== undefined ? address : partner.address,
+        city: city || partner.city,
+        state: state || partner.state,
+        pincode: pincode || partner.pincode,
+        mobile: userUpdate.mobile || partner.user?.mobile,
+        email: userUpdate.email || partner.user?.email,
+        adminRoleId: adminRoleId || undefined,
+        permissionIds: permissionIds || undefined,
+        isActive: approvalStatus ? approvalStatus === 'APPROVED' : true,
+        grantAdminAccess: grantAdminAccess !== undefined ? Boolean(grantAdminAccess) : true,
+      });
+    } else {
+      // Phlebotomist safety: strictly ensure they do NOT have an AdminUser with admin role
+      await prisma.adminUser.deleteMany({
+        where: { userId: partner.userId, userType: 'ADMIN' }
+      }).catch(() => {});
+    }
 
     // 3. Update PathologyPartner record
     const partnerUpdate: any = {
@@ -1596,6 +1804,7 @@ export const createPartnerByAdmin = async (req: Request, res: Response) => {
       password,
       adminRoleId,
       grantAdminAccess = true,
+      permissionIds,
     } = req.body;
 
     if (!labName || !name || !mobile) {
@@ -1676,29 +1885,34 @@ export const createPartnerByAdmin = async (req: Request, res: Response) => {
       },
     });
 
-    // Ensure Branch & AdminUser via reusable helper
-    const branchId = await ensurePartnerBranchAndAdminUser({
-      userId: user.id,
-      partnerId: partner.id,
-      labName: String(labName).trim(),
-      currentBranchId: partner.branchId,
-      partnerCode: partner.partnerCode,
-      address,
-      city,
-      state,
-      pincode,
-      mobile: cleanMobile,
-      email: cleanEmail,
-      adminRoleId: adminRoleId || undefined,
-      isActive: approvalStatus === 'APPROVED',
-      grantAdminAccess: grantAdminAccess !== undefined ? Boolean(grantAdminAccess) : true,
-    });
-
-    if (partner.branchId !== branchId) {
-      await prisma.pathologyPartner.update({
-        where: { id: partner.id },
-        data: { branchId },
+    // Ensure Branch & AdminUser via reusable helper (ONLY for true Lab Partners, NEVER for Phlebotomists)
+    const isPhlebotomistRole = String(role || '').toUpperCase().includes('PHLEBO') || 
+                               String(role || '').toUpperCase().includes('COLLECTOR');
+    let branchId = partner.branchId;
+    if (!isPhlebotomistRole) {
+      branchId = await ensurePartnerBranchAndAdminUser({
+        userId: user.id,
+        partnerId: partner.id,
+        labName: String(labName).trim(),
+        currentBranchId: partner.branchId,
+        partnerCode: partner.partnerCode,
+        address,
+        city,
+        state,
+        pincode,
+        mobile: cleanMobile,
+        email: cleanEmail,
+        adminRoleId: adminRoleId || undefined,
+        isActive: approvalStatus === 'APPROVED',
+        grantAdminAccess: grantAdminAccess !== undefined ? Boolean(grantAdminAccess) : true,
       });
+
+      if (partner.branchId !== branchId) {
+        await prisma.pathologyPartner.update({
+          where: { id: partner.id },
+          data: { branchId },
+        });
+      }
     }
 
     const created = await prisma.pathologyPartner.findUnique({
