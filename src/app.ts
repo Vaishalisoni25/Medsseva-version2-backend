@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import compression from 'compression';
 import categoryRoutes from './routes/categoryRoutes';
 import bookingRoutes from './routes/bookingRoutes';
 import authRoutes from './routes/authRoutes';
@@ -91,6 +92,16 @@ const parseRawBody = (req: any, _res: any, next: any) => {
 app.use('/api/payments/webhook', rawBodyMiddleware, parseRawBody);
 
 app.use(express.json());
+
+app.use(compression({
+  filter: (req, res) => {
+    if (req.headers['x-no-compression']) {
+      return false;
+    }
+    return compression.filter(req, res);
+  },
+  threshold: 1024,
+}));
 
 app.use(apiRequestLogger);
 app.use('/api', globalLimiter);
