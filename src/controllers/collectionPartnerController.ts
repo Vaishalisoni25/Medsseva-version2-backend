@@ -340,25 +340,46 @@ export const getDailyCollectionSummary = async (req: Request, res: Response) => 
         status: { in: ['COMPLETED', 'DELIVERED_TO_LAB', 'REPORT_READY', 'SAMPLE_COLLECTED'] },
         ...(targetBranchIds && targetBranchIds.length > 0 ? { branchId: { in: targetBranchIds } } : {})
       },
+      include: {
+        assignedExecutive: { select: { id: true, name: true, mobile: true } },
+        branch: { select: { id: true, name: true } },
+      },
       orderBy: { createdAt: 'asc' }
     });
 
-    const dailyMap = new Map<string, { collections: number; totalAmount: number; totalCommission: number }>();
+    const dailyMap = new Map<string, any>();
 
     bookings.forEach(b => {
       const dateStr = (b.scheduledDate || b.createdAt).toISOString().split('T')[0];
-      const existing = dailyMap.get(dateStr) || { collections: 0, totalAmount: 0, totalCommission: 0 };
-      existing.collections += 1;
-      existing.totalAmount += b.totalPaid || 0;
-      existing.totalCommission += Math.round((b.totalPaid || 0) * 0.30);
-      dailyMap.set(dateStr, existing);
+      const partnerId = b.assignedExecutiveId!;
+      const labId = b.branchId || 'central';
+      const key = `${dateStr}_${partnerId}_${labId}`;
+      
+      if (!dailyMap.has(key)) {
+        dailyMap.set(key, {
+          date: dateStr,
+          partnerId: partnerId,
+          collectionPartner: b.assignedExecutive?.name || 'Unknown',
+          partnerMobile: b.assignedExecutive?.mobile || '',
+          labId: b.branchId || '',
+          labPartner: b.branch?.name || 'Central Lab',
+          samples: 0,
+          testValue: 0,
+          commissionRate: 30,
+          commission: 0,
+          walletCredit: 0,
+          status: 'COMPLETED'
+        });
+      }
+      
+      const existing = dailyMap.get(key);
+      existing.samples += 1;
+      existing.testValue += b.totalPaid || 0;
+      existing.commission += Math.round((b.totalPaid || 0) * 0.30);
+      existing.walletCredit += Math.round((b.totalPaid || 0) * 0.30);
     });
 
-    const result = Array.from(dailyMap.entries()).map(([date, data]) => ({
-      date,
-      ...data
-    }));
-
+    const result = Array.from(dailyMap.values());
     res.json(result);
   } catch (error: any) {
     console.error('Error in getDailyCollectionSummary:', error);
@@ -371,29 +392,54 @@ export const getLabWiseCollections = async (req: Request, res: Response) => {
     const { branchId, labId, city } = req.query as any;
     const targetBranchIds = await resolveTargetBranchIds(branchId, labId, city);
 
-    const branches = await prisma.branch.findMany({
-      where: targetBranchIds && targetBranchIds.length > 0 ? { id: { in: targetBranchIds } } : undefined
+    const bookings = await prisma.booking.findMany({
+      where: {
+        assignedExecutiveId: { not: null },
+        ...(targetBranchIds && targetBranchIds.length > 0 ? { branchId: { in: targetBranchIds } } : {})
+      },
+      include: {
+        assignedExecutive: { select: { id: true, name: true, mobile: true, email: true } },
+        branch: { select: { id: true, name: true, city: true } },
+      }
     });
-    const result = await Promise.all(branches.map(async b => {
-      const bookings = await prisma.booking.findMany({
-        where: { branchId: b.id, assignedExecutiveId: { not: null } },
-        select: { totalPaid: true }
-      });
-      const samples = bookings.length;
-      const totalTestValue = bookings.reduce((sum, bk) => sum + (bk.totalPaid || 0), 0);
-      const collectionCommission = Math.round(totalTestValue * 0.30);
 
-      return {
-        labId: b.id,
-        labName: b.name,
-        city: b.city,
-        samples,
-        totalTestValue,
-        collectionCommission,
-        walletCredited: collectionCommission,
-      };
-    }));
+    const labWiseMap = new Map<string, any>();
 
+    bookings.forEach(b => {
+      const partnerId = b.assignedExecutiveId!;
+      const labId = b.branchId || 'central';
+      const key = `${partnerId}_${labId}`;
+
+      if (!labWiseMap.has(key)) {
+        labWiseMap.set(key, {
+          partnerId: partnerId,
+          collectionPartner: b.assignedExecutive?.name || 'Unknown',
+          partnerMobile: b.assignedExecutive?.mobile || '',
+          partnerEmail: b.assignedExecutive?.email || '',
+          labId: b.branchId || '',
+          labPartner: b.branch?.name || 'Central Lab',
+          labCode: '',
+          city: b.branch?.city || '',
+          numberOfSamples: 0,
+          totalTestValue: 0,
+          commissionRate: 30, // Default
+          totalCommission: 0,
+          walletAmountCredited: 0,
+          lastDeliveredAt: b.createdAt.toISOString()
+        });
+      }
+
+      const existing = labWiseMap.get(key);
+      existing.numberOfSamples += 1;
+      existing.totalTestValue += b.totalPaid || 0;
+      existing.totalCommission += Math.round((b.totalPaid || 0) * 0.30);
+      existing.walletAmountCredited += Math.round((b.totalPaid || 0) * 0.30);
+      if (b.createdAt > new Date(existing.lastDeliveredAt)) {
+         existing.lastDeliveredAt = b.createdAt.toISOString();
+      }
+    });
+
+    const result = Array.from(labWiseMap.values());
     res.json(result);
   } catch (error: any) {
     console.error('Error in getLabWiseCollections:', error);
