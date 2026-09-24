@@ -6,7 +6,7 @@ import {
   sendOtp, verifyOtp, resetPassword, loginWithOtp, loginWithFirebaseToken, registerWithFirebaseToken,
   sendEmailOtp, verifyEmailOtp,
   sendForgotPasswordOtp, verifyForgotPasswordOtp,
-  doctorLogin, partnerLogin,
+  doctorLogin, partnerLogin, updatePartner
 } from '../controllers/authController';
 import { authenticate, authorizeRoles } from '../middlewares/authMiddleware';
 
@@ -111,7 +111,7 @@ router.post('/demo-login', async (req, res) => {
     });
     
     res.json({ success: true, token, user: fullUser, message: 'Demo login successful' });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Demo login error:', error);
     res.status(500).json({ error: 'Demo login failed: ' + (error.message || '') });
   }
@@ -142,6 +142,7 @@ router.patch('/users/:id', authenticate, authorizeRoles('ADMIN', 'SUPER_ADMIN'),
 router.delete('/users/:id', authenticate, authorizeRoles('SUPER_ADMIN'), deletePatientUser);
 router.get('/partners', authenticate, authorizeRoles('ADMIN', 'SUPER_ADMIN'), getPartners);
 router.get('/partners/:id/details', authenticate, authorizeRoles('ADMIN', 'SUPER_ADMIN'), getPartnerDetails);
+router.put('/partners/:id', authenticate, authorizeRoles('ADMIN', 'SUPER_ADMIN'), updatePartner);
 router.patch('/partners/:id/approval', authenticate, authorizeRoles('ADMIN', 'SUPER_ADMIN'), updatePartnerApproval);
 router.patch('/partners/:id/documents/:docId', authenticate, authorizeRoles('ADMIN', 'SUPER_ADMIN'), updatePartnerDocumentStatusAdmin);
 router.get('/partners/available', authenticate, authorizeRoles('ADMIN', 'SUPER_ADMIN'), getAvailablePartners);

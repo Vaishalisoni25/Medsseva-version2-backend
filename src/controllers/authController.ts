@@ -1335,6 +1335,57 @@ export const updatePartnerApproval = async (req: Request, res: Response) => {
   }
 };
 
+export const updatePartner = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { labName, name, mobile, email, role, partnerCode, address, commissionRate, paymentCycle, approvalStatus, password } = req.body;
+
+    const partner = await prisma.pathologyPartner.findUnique({
+      where: { id },
+      include: { user: true }
+    });
+
+    if (!partner) {
+      return res.status(404).json({ error: 'Partner not found' });
+    }
+
+    const userUpdateData: any = {};
+    if (name) userUpdateData.name = name;
+    if (mobile) userUpdateData.mobile = mobile;
+    if (email !== undefined) userUpdateData.email = email;
+    
+    if (password) {
+      const bcrypt = require('bcryptjs');
+      userUpdateData.password = await bcrypt.hash(password, 10);
+    }
+
+    if (Object.keys(userUpdateData).length > 0) {
+      await prisma.user.update({
+        where: { id: partner.userId },
+        data: userUpdateData
+      });
+    }
+
+    const updatedPartner = await prisma.pathologyPartner.update({
+      where: { id },
+      data: {
+        labName,
+        role,
+        partnerCode,
+        address,
+        commissionRate,
+        paymentCycle,
+        approvalStatus
+      },
+      include: { user: true }
+    });
+
+    res.json(updatedPartner);
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to update partner', details: error.message });
+  }
+};
+
 export const getAvailablePartners = async (req: Request, res: Response) => {
   try {
     const { branchId, cityId } = req.query;
