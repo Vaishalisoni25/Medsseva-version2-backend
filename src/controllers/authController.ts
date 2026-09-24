@@ -694,35 +694,44 @@ export const login = async (req: Request, res: Response) => {
         return res.status(403).json({ error: 'Your account has been suspended. Contact support.', suspended: true });
       }
 
-      const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '30d' });
-      createAuditLog({
-        userId: user.id,
-        action: 'LOGIN',
-        module: 'auth',
-        performedByRole: user.role,
-        ipAddress: req.ip,
-        userAgent: req.headers['user-agent'] as string,
-        severity: 'LOW',
-        metadata: { mobile: user.mobile },
-      }).catch(console.error);
-      return res.json({
-        message: 'Login successful',
-        user: {
-          id: user.id,
-          name: user.name,
-          mobile: user.mobile,
-          email: user.email,
-          role: user.role,
-          partner: {
-            id: partner.id,
-            labName: partner.labName,
-            approvalStatus: partner.approvalStatus,
-            isAvailable: partner.isAvailable,
-            rating: partner.rating,
-          },
-        },
-        token,
+      // Check if this partner was granted Admin Panel access by Super Admin
+      const partnerAdminUser = await prisma.adminUser.findUnique({
+        where: { userId: user.id },
       });
+
+      // If NOT granted admin access, return regular mobile app partner payload (100% backward compatible)
+      if (!partnerAdminUser || !partnerAdminUser.isActive) {
+        const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '30d' });
+        createAuditLog({
+          userId: user.id,
+          action: 'LOGIN',
+          module: 'auth',
+          performedByRole: user.role,
+          ipAddress: req.ip,
+          userAgent: req.headers['user-agent'] as string,
+          severity: 'LOW',
+          metadata: { mobile: user.mobile },
+        }).catch(console.error);
+        return res.json({
+          message: 'Login successful',
+          user: {
+            id: user.id,
+            name: user.name,
+            mobile: user.mobile,
+            email: user.email,
+            role: user.role,
+            partner: {
+              id: partner.id,
+              labName: partner.labName,
+              approvalStatus: partner.approvalStatus,
+              isAvailable: partner.isAvailable,
+              rating: partner.rating,
+            },
+          },
+          token,
+        });
+      }
+      // If partner has active adminUser, do not exit early - let it fall through to adminUser loading below
     }
 
     const adminUser = await prisma.adminUser.findUnique({
@@ -1251,11 +1260,15 @@ export const getPartners = async (req: Request, res: Response) => {
             createdAt: true,
             adminUser: {
               select: {
+                id: true,
+                roleId: true,
                 branchId: true,
-                branch: { select: { id: true, name: true, city: true } }
-              }
-            }
-          }
+                isActive: true,
+                role: { select: { id: true, name: true, slug: true } },
+                branch: { select: { id: true, name: true, city: true } },
+              },
+            },
+          },
         },
         documents: true,
       },
@@ -1332,6 +1345,390 @@ export const updatePartnerApproval = async (req: Request, res: Response) => {
     res.json({ message: `Partner status updated to ${approvalStatus}`, partner });
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to update partner approval', details: error.message });
+  }
+};
+
+// Reusable select structure for partner queries
+const PARTNER_ADMIN_INCLUDE = {
+  user: {
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      mobile: true,
+      createdAt: true,
+      adminUser: {
+        select: {
+          id: true,
+          roleId: true,
+          branchId: true,
+          isActive: true,
+          role: { select: { id: true, name: true, slug: true } },
+          branch: { select: { id: true, name: true, city: true } },
+        },
+      },
+    },
+  },
+  documents: true,
+};
+
+/**
+ * Reusable helper: Ensures a PathologyPartner lab has a corresponding Branch
+ * and is connected to an AdminUser with the selected AdminRole.
+ */
+async function ensurePartnerBranchAndAdminUser(params: {
+  userId: string;
+  partnerId: string;
+  labName: string;
+  currentBranchId?: string | null;
+  partnerCode?: string | null;
+  address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  pincode?: string | null;
+  mobile?: string | null;
+  email?: string | null;
+  adminRoleId?: string | null;
+  isActive?: boolean;
+  grantAdminAccess?: boolean;
+}): Promise<string> {
+  let branchId = params.currentBranchId || null;
+
+  // 1. If branchId exists, verify and sync
+  if (branchId) {
+    const existingBranch = await prisma.branch.findUnique({ where: { id: branchId } });
+    if (existingBranch) {
+      await prisma.branch.update({
+        where: { id: branchId },
+        data: {
+          name: params.labName ? params.labName.trim() : existingBranch.name,
+          line1: params.address ? params.address.trim() : existingBranch.line1,
+          contactNumber: params.mobile || existingBranch.contactNumber,
+          email: params.email || existingBranch.email,
+        },
+      });
+    } else {
+      branchId = null;
+    }
+  }
+
+  // 2. Auto-create Branch for this Lab if not present
+  if (!branchId) {
+    const baseCode = params.partnerCode ? params.partnerCode.trim() : `LAB-${params.partnerId.slice(0, 5).toUpperCase()}`;
+    let uniqueCode = baseCode;
+    const existingBranchWithCode = await prisma.branch.findUnique({ where: { code: uniqueCode } });
+    if (existingBranchWithCode) {
+      uniqueCode = `${baseCode}-${Date.now().toString().slice(-4)}`;
+    }
+
+    const newBranch = await prisma.branch.create({
+      data: {
+        name: params.labName.trim(),
+        code: uniqueCode,
+        line1: (params.address || params.labName).trim(),
+        city: params.city || 'Central',
+        state: params.state || 'Madhya Pradesh',
+        pincode: params.pincode || '452001',
+        contactNumber: params.mobile || null,
+        email: params.email || null,
+        isActive: true,
+      },
+    });
+    branchId = newBranch.id;
+  }
+
+  // 3. Upsert AdminUser for this partner so they can access the Admin Panel
+  let effectiveRoleId = params.adminRoleId;
+  if (!effectiveRoleId) {
+    const defaultRole = await prisma.adminRole.findFirst({
+      where: { slug: { in: ['branch_admin', 'admin', 'lab_department'] } },
+    }) || await prisma.adminRole.findFirst();
+    effectiveRoleId = defaultRole?.id;
+  }
+
+  const shouldBeActive = params.isActive !== false && params.grantAdminAccess !== false;
+
+  if (effectiveRoleId && branchId) {
+    await prisma.adminUser.upsert({
+      where: { userId: params.userId },
+      update: {
+        roleId: effectiveRoleId,
+        branchId,
+        partnerId: params.partnerId,
+        userType: 'ADMIN',
+        isActive: shouldBeActive,
+      },
+      create: {
+        userId: params.userId,
+        roleId: effectiveRoleId,
+        branchId,
+        partnerId: params.partnerId,
+        userType: 'ADMIN',
+        isActive: shouldBeActive,
+      },
+    });
+  }
+
+  return branchId;
+}
+
+export const updatePartnerByAdmin = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const {
+      labName,
+      name,
+      mobile,
+      email,
+      role,
+      partnerCode,
+      address,
+      city,
+      state,
+      pincode,
+      commissionRate,
+      paymentCycle,
+      approvalStatus,
+      password,
+      adminRoleId,
+      grantAdminAccess,
+    } = req.body;
+
+    const partner = await prisma.pathologyPartner.findUnique({
+      where: { id },
+      include: { user: true },
+    });
+
+    if (!partner) {
+      return res.status(404).json({ error: 'Partner not found' });
+    }
+
+    // 1. Update User info if passed
+    const userUpdate: any = {};
+    if (name && String(name).trim()) userUpdate.name = String(name).trim();
+    if (email && String(email).trim()) userUpdate.email = String(email).trim().toLowerCase();
+    if (mobile && String(mobile).trim()) {
+      const cleanMobile = String(mobile).replace(/\D/g, '').slice(-10);
+      if (cleanMobile.length === 10) userUpdate.mobile = cleanMobile;
+    }
+    if (password && String(password).trim().length > 0) {
+      userUpdate.password = await bcrypt.hash(String(password).trim(), 10);
+    }
+    if (Object.keys(userUpdate).length > 0) {
+      await prisma.user.update({
+        where: { id: partner.userId },
+        data: userUpdate,
+      });
+    }
+
+    // 2. Ensure Branch & AdminUser via reusable helper
+    const targetBranchId = await ensurePartnerBranchAndAdminUser({
+      userId: partner.userId,
+      partnerId: partner.id,
+      labName: labName || partner.labName,
+      currentBranchId: partner.branchId,
+      partnerCode: partnerCode || partner.partnerCode,
+      address: address !== undefined ? address : partner.address,
+      city: city || partner.city,
+      state: state || partner.state,
+      pincode: pincode || partner.pincode,
+      mobile: userUpdate.mobile || partner.user?.mobile,
+      email: userUpdate.email || partner.user?.email,
+      adminRoleId: adminRoleId || undefined,
+      isActive: approvalStatus ? approvalStatus === 'APPROVED' : true,
+      grantAdminAccess: grantAdminAccess !== undefined ? Boolean(grantAdminAccess) : true,
+    });
+
+    // 3. Update PathologyPartner record
+    const partnerUpdate: any = {
+      branchId: targetBranchId,
+    };
+    if (labName) partnerUpdate.labName = String(labName).trim();
+    if (name) partnerUpdate.ownerName = String(name).trim();
+    if (role) partnerUpdate.role = String(role).trim();
+    if (partnerCode) partnerUpdate.partnerCode = String(partnerCode).trim();
+    if (address !== undefined) partnerUpdate.address = address ? String(address).trim() : null;
+    if (city) partnerUpdate.city = String(city).trim();
+    if (state) partnerUpdate.state = String(state).trim();
+    if (pincode) partnerUpdate.pincode = String(pincode).trim();
+    if (commissionRate !== undefined) partnerUpdate.commissionRate = Number(commissionRate);
+    if (paymentCycle) partnerUpdate.paymentCycle = String(paymentCycle).trim();
+    if (approvalStatus) partnerUpdate.approvalStatus = approvalStatus;
+    if (password && String(password).trim().length > 0) {
+      partnerUpdate.password = String(password).trim();
+    }
+
+    const updatedPartner = await prisma.pathologyPartner.update({
+      where: { id },
+      data: partnerUpdate,
+      include: PARTNER_ADMIN_INCLUDE,
+    });
+
+    res.json({
+      message: 'Partner updated successfully',
+      partner: updatedPartner,
+    });
+  } catch (error: any) {
+    console.error('Update partner by admin error:', error);
+    res.status(500).json({ error: 'Failed to update partner', details: error.message });
+  }
+};
+
+export const createPartnerByAdmin = async (req: Request, res: Response) => {
+  try {
+    const {
+      labName,
+      name,
+      mobile,
+      email,
+      role = 'LAB_PARTNER',
+      partnerCode,
+      address,
+      city,
+      state,
+      pincode,
+      commissionRate = 30,
+      paymentCycle = 'MONTHLY',
+      approvalStatus = 'APPROVED',
+      password,
+      adminRoleId,
+      grantAdminAccess = true,
+    } = req.body;
+
+    if (!labName || !name || !mobile) {
+      return res.status(400).json({ error: 'Lab name, contact name, and mobile number are required' });
+    }
+
+    const cleanMobile = String(mobile).replace(/\D/g, '').slice(-10);
+    if (cleanMobile.length !== 10) {
+      return res.status(400).json({ error: 'Valid 10-digit mobile number is required' });
+    }
+
+    const cleanEmail = email ? String(email).trim().toLowerCase() : undefined;
+
+    let user = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { mobile: cleanMobile },
+          ...(cleanEmail ? [{ email: cleanEmail }] : []),
+        ],
+      },
+    });
+
+    const plainPassword = password || 'Partner@123';
+    const hashedPassword = await bcrypt.hash(plainPassword, 10);
+
+    if (!user) {
+      const referralCode = await generateUniqueReferralCode();
+      user = await prisma.user.create({
+        data: {
+          name: String(name).trim(),
+          email: cleanEmail,
+          mobile: cleanMobile,
+          password: hashedPassword,
+          role: 'PATHOLOGY_PARTNER',
+          referralCode,
+        },
+      });
+    } else {
+      if (password) {
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { password: hashedPassword },
+        });
+      }
+    }
+
+    // Upsert PathologyPartner record
+    const partner = await prisma.pathologyPartner.upsert({
+      where: { userId: user.id },
+      update: {
+        labName: String(labName).trim(),
+        ownerName: String(name).trim(),
+        role: String(role).trim(),
+        partnerCode: partnerCode || undefined,
+        address: address ? String(address).trim() : null,
+        city: city || null,
+        state: state || null,
+        pincode: pincode || null,
+        commissionRate: Number(commissionRate) || 30,
+        paymentCycle: paymentCycle || 'MONTHLY',
+        approvalStatus: approvalStatus || 'APPROVED',
+        password: plainPassword,
+      },
+      create: {
+        userId: user.id,
+        labName: String(labName).trim(),
+        ownerName: String(name).trim(),
+        role: String(role).trim(),
+        partnerCode: partnerCode || `LAB-${user.id.slice(0, 5).toUpperCase()}`,
+        address: address ? String(address).trim() : null,
+        city: city || null,
+        state: state || null,
+        pincode: pincode || null,
+        commissionRate: Number(commissionRate) || 30,
+        paymentCycle: paymentCycle || 'MONTHLY',
+        approvalStatus: approvalStatus || 'APPROVED',
+        password: plainPassword,
+      },
+    });
+
+    // Ensure Branch & AdminUser via reusable helper
+    const branchId = await ensurePartnerBranchAndAdminUser({
+      userId: user.id,
+      partnerId: partner.id,
+      labName: String(labName).trim(),
+      currentBranchId: partner.branchId,
+      partnerCode: partner.partnerCode,
+      address,
+      city,
+      state,
+      pincode,
+      mobile: cleanMobile,
+      email: cleanEmail,
+      adminRoleId: adminRoleId || undefined,
+      isActive: approvalStatus === 'APPROVED',
+      grantAdminAccess: grantAdminAccess !== undefined ? Boolean(grantAdminAccess) : true,
+    });
+
+    if (partner.branchId !== branchId) {
+      await prisma.pathologyPartner.update({
+        where: { id: partner.id },
+        data: { branchId },
+      });
+    }
+
+    const created = await prisma.pathologyPartner.findUnique({
+      where: { id: partner.id },
+      include: PARTNER_ADMIN_INCLUDE,
+    });
+
+    res.status(201).json(created);
+  } catch (error: any) {
+    console.error('Create partner by admin error:', error);
+    res.status(500).json({ error: 'Failed to create partner', details: error.message });
+  }
+};
+
+export const deletePartnerByAdmin = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const partner = await prisma.pathologyPartner.findUnique({ where: { id } });
+    if (!partner) return res.status(404).json({ error: 'Partner not found' });
+
+    // Delete associated adminUser if exists
+    await prisma.adminUser.deleteMany({ where: { userId: partner.userId } });
+
+    // Delete partner documents
+    await prisma.partnerDocument.deleteMany({ where: { partnerId: id } });
+
+    // Delete pathology partner
+    await prisma.pathologyPartner.delete({ where: { id } });
+
+    res.json({ message: 'Partner deleted successfully' });
+  } catch (error: any) {
+    console.error('Delete partner error:', error);
+    res.status(500).json({ error: 'Failed to delete partner', details: error.message });
   }
 };
 
