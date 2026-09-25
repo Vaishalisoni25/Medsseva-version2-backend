@@ -2,9 +2,44 @@ import { Request, Response } from 'express';
 import { branchService } from '../services/branch.service';
 import { AuthRequest } from '../middlewares/authMiddleware';
 import { prisma } from '../lib/prisma';
+import jwt from 'jsonwebtoken';
+import { env } from '../config/env';
+
 export const getAllBranches = async (req: Request, res: Response) => {
   try {
-    const branches = await branchService.getAllBranches(req.query as any);
+    let branches = await branchService.getAllBranches(req.query as any);
+
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.split(' ')[1];
+      try {
+        const decoded = jwt.verify(token, env.jwtSecret) as { id: string };
+        if (decoded && decoded.id) {
+          const user = await prisma.user.findUnique({
+            where: { id: decoded.id },
+            include: { pathologyPartner: true, addresses: true }
+          });
+
+          if (user && user.role !== 'ADMIN' && user.role !== 'SUPER_ADMIN') {
+            let userCity: string | null | undefined = null;
+            if (user.pathologyPartner && user.pathologyPartner.city) {
+              userCity = user.pathologyPartner.city;
+            } else if (user.addresses && user.addresses.length > 0) {
+              userCity = user.addresses[0].city;
+            }
+
+            if (userCity) {
+              branches = branches.filter((b: any) => 
+                b.city && b.city.toLowerCase() === userCity?.toLowerCase()
+              );
+            }
+          }
+        }
+      } catch (e) {
+        // Ignore token errors for public endpoint
+      }
+    }
+
     res.json({ success: true, data: branches });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
