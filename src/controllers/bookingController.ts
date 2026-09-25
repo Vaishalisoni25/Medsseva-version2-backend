@@ -140,7 +140,11 @@ export const getAllBookings = async (req: any, res: Response) => {
     } else {
       if (mobile) where.user = { mobile: String(mobile) };
 
-      // Automatic Branch Isolation
+      // Automatic Partner & Branch Isolation
+      if (!req.user.isSuperAdmin && req.user.partnerId) {
+        where.assignedPartnerId = req.user.partnerId;
+      }
+      
       if (!req.user.isSuperAdmin && req.user.branchId) {
         where.branchId = req.user.branchId;
       } else if (branchId) {

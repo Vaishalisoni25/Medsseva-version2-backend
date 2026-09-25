@@ -6,7 +6,11 @@ export const getDashboardAnalytics = async (req: AuthRequest, res: Response) => 
   try {
     const { branchId } = req.query;
     const effectiveBranchId = !req.user?.isSuperAdmin && req.user?.branchId ? req.user.branchId : (branchId as string | undefined);
-    const branchFilter = effectiveBranchId ? { branchId: effectiveBranchId } : {};
+    const branchFilter: any = effectiveBranchId ? { branchId: effectiveBranchId } : {};
+
+    if (!req.user?.isSuperAdmin && req.user?.partnerId) {
+      branchFilter.assignedPartnerId = req.user.partnerId;
+    }
 
     const now = new Date();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
