@@ -5,11 +5,24 @@ import { AuthRequest } from '../middlewares/authMiddleware';
 export const getDashboardAnalytics = async (req: AuthRequest, res: Response) => {
   try {
     const { branchId } = req.query;
-    const effectiveBranchId = !req.user?.isSuperAdmin && req.user?.branchId ? req.user.branchId : (branchId as string | undefined);
-    const branchFilter: any = effectiveBranchId ? { branchId: effectiveBranchId } : {};
+    let branchFilter: any = {};
+    let effectiveBranchId: string | undefined = undefined;
 
-    if (!req.user?.isSuperAdmin && req.user?.partnerId) {
-      branchFilter.assignedPartnerId = req.user.partnerId;
+    if (!req.user?.isSuperAdmin) {
+      const scopeConditions: any[] = [];
+      if (req.user?.branchId) {
+        scopeConditions.push({ branchId: req.user.branchId });
+        effectiveBranchId = req.user.branchId;
+      }
+      if (req.user?.partnerId) {
+        scopeConditions.push({ assignedPartnerId: req.user.partnerId });
+      }
+      if (scopeConditions.length > 0) {
+        branchFilter = { OR: scopeConditions };
+      }
+    } else if (branchId) {
+      effectiveBranchId = String(branchId);
+      branchFilter = { branchId: effectiveBranchId };
     }
 
     const now = new Date();
@@ -58,9 +71,15 @@ export const getDashboardAnalytics = async (req: AuthRequest, res: Response) => 
         },
       }),
 
-      // All reports
       prisma.report.findMany({
-        where: effectiveBranchId ? { OR: [{ reportBranchId: effectiveBranchId }, { booking: { branchId: effectiveBranchId } }] } : {},
+        where: !req.user?.isSuperAdmin && (req.user?.branchId || req.user?.partnerId)
+          ? {
+              OR: [
+                ...(req.user.branchId ? [{ reportBranchId: req.user.branchId }, { booking: { branchId: req.user.branchId } }] : []),
+                ...(req.user.partnerId ? [{ booking: { assignedPartnerId: req.user.partnerId } }] : []),
+              ]
+            }
+          : (effectiveBranchId ? { OR: [{ reportBranchId: effectiveBranchId }, { booking: { branchId: effectiveBranchId } }] } : {}),
         select: {
           status: true,
           reportedDate: true,

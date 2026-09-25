@@ -128,7 +128,7 @@ export const getAllBookings = async (req: any, res: Response) => {
     if (req.user.role === 'EXECUTIVE') {
       where.assignedExecutiveId = req.user.id;
       where.collectionMode = 'HOME';
-    } else if (!['ADMIN', 'SUPER_ADMIN', 'PATHOLOGIST', 'LAB_DEPARTMENT', 'FRANCHISE'].includes(req.user.role)) {
+    } else if (!['ADMIN', 'SUPER_ADMIN', 'PATHOLOGIST', 'LAB_DEPARTMENT', 'FRANCHISE', 'PATHOLOGY_PARTNER'].includes(req.user.role)) {
       const userConditions: any[] = [{ userId: req.user.id }];
       if (req.user.mobile) {
         userConditions.push({ user: { mobile: req.user.mobile } });
@@ -140,13 +140,18 @@ export const getAllBookings = async (req: any, res: Response) => {
     } else {
       if (mobile) where.user = { mobile: String(mobile) };
 
-      // Automatic Partner & Branch Isolation
-      if (!req.user.isSuperAdmin && req.user.partnerId) {
-        where.assignedPartnerId = req.user.partnerId;
-      }
-      
-      if (!req.user.isSuperAdmin && req.user.branchId) {
-        where.branchId = req.user.branchId;
+      // Automatic Branch & Partner Lab Isolation
+      if (!req.user.isSuperAdmin) {
+        const scopeConditions: any[] = [];
+        if (req.user.branchId) {
+          scopeConditions.push({ branchId: req.user.branchId });
+        }
+        if (req.user.partnerId) {
+          scopeConditions.push({ assignedPartnerId: req.user.partnerId });
+        }
+        if (scopeConditions.length > 0) {
+          where.OR = scopeConditions;
+        }
       } else if (branchId) {
         where.branchId = String(branchId);
       }

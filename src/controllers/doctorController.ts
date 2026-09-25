@@ -382,11 +382,61 @@ export const updateDoctorProfileSelf = async (req: any, res: Response) => {
 export const deleteDoctor = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
-    await (prisma as any).doctor.update({
-      where: { id },
-      data: { isActive: false },
+    const doctor = await (prisma as any).doctor.findFirst({
+      where: {
+        OR: [
+          { id },
+          { userId: id },
+        ],
+      },
     });
-    res.json({ success: true, message: 'Doctor deactivated successfully' });
+
+    if (!doctor) {
+      return res.status(404).json({ error: 'Doctor not found' });
+    }
+
+    const doctorId = doctor.id;
+    const userId = doctor.userId;
+
+    // 1. Unlink bookings where this doctor was the referring doctor
+    await prisma.booking.updateMany({
+      where: { referringDoctorId: doctorId },
+      data: { referringDoctorId: null },
+    }).catch((err: any) => console.warn('Unlink booking referringDoctor warning:', err.message));
+
+    // 2. Delete referral commissions linked to this doctor
+    await prisma.referralCommission.deleteMany({
+      where: { doctorId: doctorId },
+    }).catch((err: any) => console.warn('Delete doctor referral commissions warning:', err.message));
+
+    // 3. Delete adminUser record if linked to this doctor
+    if (userId) {
+      await (prisma as any).adminUser.deleteMany({
+        where: { userId },
+      }).catch((err: any) => console.warn('Delete doctor adminUser warning:', err.message));
+    }
+
+    // 4. Delete the doctor record permanently from DB
+    await (prisma as any).doctor.delete({
+      where: { id: doctorId },
+    });
+
+    // 5. Clean up User account if doctor had a login account and no customer bookings
+    if (userId) {
+      try {
+        const doctorUser = await prisma.user.findUnique({
+          where: { id: userId },
+          include: { bookings: { select: { id: true }, take: 1 } },
+        });
+        if (doctorUser && (doctorUser.role === 'DOCTOR' || (doctorUser.role as string) === 'PATHOLOGIST') && (!doctorUser.bookings || doctorUser.bookings.length === 0)) {
+          await prisma.user.delete({ where: { id: userId } });
+        }
+      } catch (e: any) {
+        console.warn('Could not cascade delete doctor user:', e.message);
+      }
+    }
+
+    res.json({ success: true, message: 'Doctor deleted successfully' });
   } catch (error: any) {
     console.error('Error deleting doctor:', error);
     res.status(500).json({ error: 'Failed to delete doctor', details: error.message });
