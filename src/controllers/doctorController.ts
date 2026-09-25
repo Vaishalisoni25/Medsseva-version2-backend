@@ -470,7 +470,7 @@ export const deleteDoctor = async (req: AuthRequest, res: Response) => {
         totalBilled += pkgs.reduce((sum, p) => sum + (p.price || 0), 0);
       }
   
-      let finalAddressId = null;
+      let finalAddressId: string;
       if (address && address !== 'Doctor Clinic Location') {
         // Create an address record for accurate radius calculations
         const newAddr = await prisma.address.create({
@@ -486,6 +486,27 @@ export const deleteDoctor = async (req: AuthRequest, res: Response) => {
           }
         });
         finalAddressId = newAddr.id;
+      } else {
+        const existingAddr = await prisma.address.findFirst({
+          where: { userId: doctorUserId }
+        });
+        if (existingAddr) {
+          finalAddressId = existingAddr.id;
+        } else {
+          const defaultAddr = await prisma.address.create({
+            data: {
+              userId: doctorUserId,
+              type: 'CLINIC',
+              line1: address || 'Doctor Clinic Location',
+              city: 'Unknown',
+              state: 'Unknown',
+              pincode: '000000',
+              latitude: latitude ? Number(latitude) : null,
+              longitude: longitude ? Number(longitude) : null,
+            }
+          });
+          finalAddressId = defaultAddr.id;
+        }
       }
   
       const bookingCode = `DOC-PU-${Date.now().toString().slice(-6)}`;
@@ -561,7 +582,7 @@ export const doctorDirectSampleHandover = async (req: AuthRequest, res: Response
       totalBilled += pkgs.reduce((sum, p) => sum + (p.price || 0), 0);
     }
 
-    let finalAddressId = null;
+    let finalAddressId: string;
     if (address && address !== 'Direct Lab Handover') {
       const newAddr = await prisma.address.create({
         data: {
@@ -576,6 +597,27 @@ export const doctorDirectSampleHandover = async (req: AuthRequest, res: Response
         }
       });
       finalAddressId = newAddr.id;
+    } else {
+      const existingAddr = await prisma.address.findFirst({
+        where: { userId: doctorUserId }
+      });
+      if (existingAddr) {
+        finalAddressId = existingAddr.id;
+      } else {
+        const defaultAddr = await prisma.address.create({
+          data: {
+            userId: doctorUserId,
+            type: 'CLINIC',
+            line1: address || 'Direct Lab Handover',
+            city: 'Unknown',
+            state: 'Unknown',
+            pincode: '000000',
+            latitude: latitude ? Number(latitude) : null,
+            longitude: longitude ? Number(longitude) : null,
+          }
+        });
+        finalAddressId = defaultAddr.id;
+      }
     }
 
     const bookingCode = `DOC-HO-${Date.now().toString().slice(-6)}`;
