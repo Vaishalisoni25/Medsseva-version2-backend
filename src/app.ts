@@ -94,11 +94,11 @@ app.use('/api/payments/webhook', rawBodyMiddleware, parseRawBody);
 app.use(express.json());
 
 app.use(compression({
-  filter: (req, res) => {
-    if (req.headers['x-no-compression']) {
+  filter: (req: any, res: any) => {
+    if (req.headers && req.headers['x-no-compression']) {
       return false;
     }
-    return compression.filter(req, res);
+    return (compression as any).filter ? (compression as any).filter(req, res) : true;
   },
   threshold: 1024,
 }));
