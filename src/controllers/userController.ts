@@ -46,8 +46,9 @@ export const getMe = async (req: AuthRequest, res: Response) => {
       include: { branch: true, role: true }
     });
 
-    const isEmployee = !!(
-      adminUser && (
+    const isEmployee = Boolean(
+      adminUser &&
+      adminUser.userType !== 'FREELANCER' && (
         adminUser.userType === 'EMPLOYEE' ||
         adminUser.userType === 'STAFF' ||
         adminUser.branchId ||

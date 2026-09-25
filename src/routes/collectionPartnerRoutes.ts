@@ -13,7 +13,7 @@ import {
 
 const router = Router();
 
-router.use(authenticate, authorizeRoles('ADMIN', 'SUPER_ADMIN'));
+router.use(authenticate, authorizeRoles('ADMIN', 'SUPER_ADMIN', 'PATHOLOGY_PARTNER'));
 
 router.get('/summary', getCollectionPartnersSummary);
 router.get('/', getCollectionPartners);

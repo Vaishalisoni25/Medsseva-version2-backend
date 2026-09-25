@@ -13,8 +13,17 @@ export const getBookingsForReport = async (req: AuthRequest, res: Response) => {
       status: { notIn: ['CANCELLED', 'PENDING'] },
     };
 
-    if (!req.user?.isSuperAdmin && req.user?.branchId) {
-      where.branchId = req.user.branchId;
+    if (!req.user?.isSuperAdmin) {
+      const scopeConditions: any[] = [];
+      if (req.user?.branchId) {
+        scopeConditions.push({ branchId: req.user.branchId });
+      }
+      if (req.user?.partnerId) {
+        scopeConditions.push({ assignedPartnerId: req.user.partnerId });
+      }
+      if (scopeConditions.length > 0) {
+        where.OR = scopeConditions;
+      }
     } else if (branchId) {
       where.branchId = String(branchId);
     }

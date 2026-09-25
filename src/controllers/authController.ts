@@ -863,8 +863,8 @@ export const login = async (req: Request, res: Response) => {
         branchName: adminUser?.branch?.name || null,
         franchiseId: adminUser?.franchiseId || null,
         userType: adminUser?.userType || null,
-        isEmployee: !!(adminUser && (adminUser.userType === 'STAFF' || adminUser.userType === 'EMPLOYEE' || (adminUser.designation && /phlebotomist|collector|phlebo/i.test(adminUser.designation)))),
-        phlebotomistType: (adminUser && (adminUser.userType === 'STAFF' || adminUser.userType === 'EMPLOYEE' || (adminUser.designation && /phlebotomist|collector|phlebo/i.test(adminUser.designation)))) ? 'EMPLOYEE' : 'FREELANCER',
+        isEmployee: !!(adminUser && adminUser.userType !== 'FREELANCER' && (adminUser.userType === 'STAFF' || adminUser.userType === 'EMPLOYEE' || (adminUser.designation && /phlebotomist|collector|phlebo/i.test(adminUser.designation)))),
+        phlebotomistType: (adminUser && adminUser.userType !== 'FREELANCER' && (adminUser.userType === 'STAFF' || adminUser.userType === 'EMPLOYEE' || (adminUser.designation && /phlebotomist|collector|phlebo/i.test(adminUser.designation)))) ? 'EMPLOYEE' : 'FREELANCER',
         designation: adminUser?.designation || null,
         referralCode: userReferralCode,
         isFirstTestFreeEligible: user.isFirstTestFreeEligible,
@@ -2643,6 +2643,23 @@ export const loginWithFirebaseToken = async (req: Request, res: Response) => {
     const partnerRecord = ((user.role as string) === 'EXECUTIVE' || (user.role as string) === 'PATHOLOGY_PARTNER')
       ? await prisma.pathologyPartner.findUnique({ where: { userId: user.id } })
       : null;
+    const adminUser = await prisma.adminUser.findUnique({
+      where: { userId: user.id },
+      include: { branch: true }
+    });
+
+    const isEmployee = Boolean(
+      adminUser &&
+      adminUser.userType !== 'FREELANCER' && (
+        adminUser.userType === 'STAFF' ||
+        adminUser.userType === 'EMPLOYEE' ||
+        adminUser.branchId ||
+        (adminUser.designation && /phlebotomist|collector|staff|employee/i.test(adminUser.designation)) ||
+        (adminUser.department && /phlebotom|sample collection/i.test(adminUser.department))
+      )
+    );
+    const phlebotomistType = isEmployee ? 'EMPLOYEE' : 'FREELANCER';
+    const userType = adminUser?.userType || (isEmployee ? 'EMPLOYEE' : 'FREELANCER');
 
     // Issue standard MedsSeva JWT session
     const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '15d' });
@@ -2657,6 +2674,12 @@ export const loginWithFirebaseToken = async (req: Request, res: Response) => {
         role: user.role,
         uhid: user.uhid,
         referralCode: user.referralCode,
+        isEmployee,
+        phlebotomistType,
+        userType,
+        branchId: adminUser?.branchId || null,
+        branchName: adminUser?.branch?.name || null,
+        designation: adminUser?.designation || null,
         doctor: doctorRecord,
         partner: partnerRecord,
       },
@@ -2790,6 +2813,23 @@ export const loginWithOtp = async (req: Request, res: Response) => {
 
     const doctorRecord = (user.role === 'PATHOLOGIST' || (user.role as string) === 'DOCTOR') ? await prisma.doctor.findUnique({ where: { userId: user.id } }) : null;
     const partnerRecord = ((user.role as string) === 'EXECUTIVE' || (user.role as string) === 'PATHOLOGY_PARTNER') ? await prisma.pathologyPartner.findUnique({ where: { userId: user.id } }) : null;
+    const adminUser = await prisma.adminUser.findUnique({
+      where: { userId: user.id },
+      include: { branch: true }
+    });
+
+    const isEmployee = Boolean(
+      adminUser &&
+      adminUser.userType !== 'FREELANCER' && (
+        adminUser.userType === 'STAFF' ||
+        adminUser.userType === 'EMPLOYEE' ||
+        adminUser.branchId ||
+        (adminUser.designation && /phlebotomist|collector|staff|employee/i.test(adminUser.designation)) ||
+        (adminUser.department && /phlebotom|sample collection/i.test(adminUser.department))
+      )
+    );
+    const phlebotomistType = isEmployee ? 'EMPLOYEE' : 'FREELANCER';
+    const userType = adminUser?.userType || (isEmployee ? 'EMPLOYEE' : 'FREELANCER');
 
     const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '15d' });
     return res.json({
@@ -2802,6 +2842,12 @@ export const loginWithOtp = async (req: Request, res: Response) => {
         role: user.role,
         uhid: user.uhid,
         referralCode: user.referralCode,
+        isEmployee,
+        phlebotomistType,
+        userType,
+        branchId: adminUser?.branchId || null,
+        branchName: adminUser?.branch?.name || null,
+        designation: adminUser?.designation || null,
         doctor: doctorRecord,
         partner: partnerRecord,
       },

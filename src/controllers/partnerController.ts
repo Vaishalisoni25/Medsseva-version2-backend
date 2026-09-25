@@ -1337,21 +1337,68 @@ export const getPartnerBranchStaff = async (req: any, res: Response) => {
       include: { adminUser: true }
     });
 
-    const branchId = partner?.branchId || user?.adminUser?.branchId;
+    // 1. Resolve all valid branch IDs belonging to this partner
+    const branchIds = new Set<string>();
+    if (partner?.branchId) branchIds.add(partner.branchId);
+    if (user?.adminUser?.branchId) branchIds.add(user.adminUser.branchId);
+
+    // Also link any branch that matches partner's phone or email
+    const partnerMobile = user?.mobile;
+    const partnerEmail = user?.email;
+    if (partnerMobile || partnerEmail) {
+      const branches = await prisma.branch.findMany({
+        where: {
+          OR: [
+            ...(partnerMobile ? [{ contactNumber: partnerMobile }] : []),
+            ...(partnerEmail ? [{ email: partnerEmail }] : []),
+            ...(partner?.partnerCode ? [{ code: partner.partnerCode }] : []),
+          ],
+        },
+        select: { id: true }
+      });
+      branches.forEach(b => branchIds.add(b.id));
+    }
+
     const partnerId = partner?.id;
 
     const whereConditions: any[] = [];
-    if (branchId) whereConditions.push({ branchId });
-    if (partnerId) whereConditions.push({ partnerId });
+    if (branchIds.size > 0) {
+      whereConditions.push({ branchId: { in: Array.from(branchIds) } });
+    }
+    if (partnerId) {
+      whereConditions.push({ partnerId });
+    }
 
+    if (whereConditions.length === 0) {
+      return res.json([]);
+    }
+
+    // 2. Fetch only the in-house phlebotomists / sample collectors of this branch/partner
     const staffList = await prisma.adminUser.findMany({
       where: {
-        ...(whereConditions.length > 0 ? { OR: whereConditions } : {}),
-        userType: 'STAFF',
+        OR: whereConditions,
         isActive: true,
+        AND: [
+          {
+            OR: [
+              { userType: { in: ['STAFF', 'EMPLOYEE'] } },
+              { user: { role: 'EXECUTIVE' } },
+            ]
+          },
+          {
+            OR: [
+              { designation: { contains: 'phlebotom', mode: 'insensitive' } },
+              { designation: { contains: 'collector', mode: 'insensitive' } },
+              { department: { contains: 'phlebotom', mode: 'insensitive' } },
+              { department: { contains: 'collection', mode: 'insensitive' } },
+              { user: { role: 'EXECUTIVE' } },
+            ]
+          }
+        ]
       },
       include: {
-        user: { select: { id: true, name: true, email: true, mobile: true, role: true } }
+        user: { select: { id: true, name: true, email: true, mobile: true, role: true } },
+        branch: { select: { id: true, name: true } },
       }
     });
 
@@ -1363,6 +1410,7 @@ export const getPartnerBranchStaff = async (req: any, res: Response) => {
       mobile: s.user?.mobile || '',
       role: s.user?.role || 'EXECUTIVE',
       branchId: s.branchId,
+      branchName: s.branch?.name || '',
       designation: s.designation || 'In-House Phlebotomist',
     }));
 

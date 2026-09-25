@@ -26,7 +26,8 @@ export const getCollectionPartnersSummary = async (req: Request, res: Response) 
         ...(targetBranchIds && targetBranchIds.length > 0 ? {
           OR: [
             { adminUser: { branchId: { in: targetBranchIds } } },
-            { pathologyPartner: { branchId: { in: targetBranchIds } } }
+            { pathologyPartner: { branchId: { in: targetBranchIds } } },
+            { assignedCollections: { some: { branchId: { in: targetBranchIds } } } }
           ]
         } : {})
       },
@@ -81,7 +82,8 @@ export const getCollectionPartners = async (req: Request, res: Response) => {
         ...(targetBranchIds && targetBranchIds.length > 0 ? {
           OR: [
             { adminUser: { branchId: { in: targetBranchIds } } },
-            { pathologyPartner: { branchId: { in: targetBranchIds } } }
+            { pathologyPartner: { branchId: { in: targetBranchIds } } },
+            { assignedCollections: { some: { branchId: { in: targetBranchIds } } } }
           ]
         } : {})
       },
@@ -176,7 +178,7 @@ export const getCollectionPartners = async (req: Request, res: Response) => {
       filtered = filtered.filter(p => p.status === String(status));
     }
     if (labId && labId !== 'ALL') {
-      filtered = filtered.filter(p => p.assignedLab?.id === String(labId));
+      filtered = filtered.filter(p => !p.assignedLab || p.assignedLab?.id === String(labId));
     }
     if (search) {
       const q = String(search).toLowerCase();
@@ -200,7 +202,12 @@ export const getCollectionPartnerDetails = async (req: Request, res: Response) =
     const { id } = req.params;
 
     const user = await prisma.user.findFirst({
-      where: { id, role: 'EXECUTIVE' },
+      where: {
+        OR: [
+          { id },
+          { pathologyPartner: { id } }
+        ]
+      },
       include: {
         adminUser: { include: { branch: true, role: true } },
         pathologyPartner: {
@@ -254,8 +261,8 @@ export const getCollectionPartnerDetails = async (req: Request, res: Response) =
         sampleCondition: b.sample?.condition || 'GOOD',
         patient: {
           name: b.patientName,
-          mobile: b.patientMobile || b.user.mobile,
-          uhid: b.user.uhid || null,
+          mobile: b.patientMobile || b.user?.mobile || '',
+          uhid: b.user?.uhid || null,
           age: b.patientAge || null,
           gender: b.patientGender || null,
         },

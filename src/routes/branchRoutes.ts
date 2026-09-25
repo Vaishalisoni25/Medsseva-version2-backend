@@ -12,7 +12,7 @@ import { authenticate, authorizeRoles } from '../middlewares/authMiddleware';
 
 const router = Router();
 
-router.get('/admin-locations', authenticate, authorizeRoles('ADMIN', 'SUPER_ADMIN'), getAdminLocations);
+router.get('/admin-locations', authenticate, authorizeRoles('ADMIN', 'SUPER_ADMIN', 'PATHOLOGY_PARTNER'), getAdminLocations);
 router.get('/', getAllBranches);
 router.get('/:id', getBranchById);
 
