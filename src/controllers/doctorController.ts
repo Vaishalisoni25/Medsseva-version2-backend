@@ -420,19 +420,19 @@ export const deleteDoctor = async (req: AuthRequest, res: Response) => {
         totalBilled += pkgs.reduce((sum, p) => sum + (p.price || 0), 0);
       }
   
-      let finalAddressId = address || 'Doctor Clinic Location';
-      if (latitude && longitude && finalAddressId !== 'Doctor Clinic Location') {
+      let finalAddressId = null;
+      if (address && address !== 'Doctor Clinic Location') {
         // Create an address record for accurate radius calculations
         const newAddr = await prisma.address.create({
           data: {
             userId: doctorUserId,
             type: 'CLINIC',
-            line1: finalAddressId,
+            line1: address,
             city: 'Unknown',
             state: 'Unknown',
             pincode: '000000',
-            latitude: Number(latitude),
-            longitude: Number(longitude),
+            latitude: latitude ? Number(latitude) : null,
+            longitude: longitude ? Number(longitude) : null,
           }
         });
         finalAddressId = newAddr.id;
@@ -511,18 +511,18 @@ export const doctorDirectSampleHandover = async (req: AuthRequest, res: Response
       totalBilled += pkgs.reduce((sum, p) => sum + (p.price || 0), 0);
     }
 
-    let finalAddressId = address || 'Direct Lab Handover';
-    if (latitude && longitude && finalAddressId !== 'Direct Lab Handover') {
+    let finalAddressId = null;
+    if (address && address !== 'Direct Lab Handover') {
       const newAddr = await prisma.address.create({
         data: {
           userId: doctorUserId,
           type: 'CLINIC',
-          line1: finalAddressId,
+          line1: address,
           city: 'Unknown',
           state: 'Unknown',
           pincode: '000000',
-          latitude: Number(latitude),
-          longitude: Number(longitude),
+          latitude: latitude ? Number(latitude) : null,
+          longitude: longitude ? Number(longitude) : null,
         }
       });
       finalAddressId = newAddr.id;
