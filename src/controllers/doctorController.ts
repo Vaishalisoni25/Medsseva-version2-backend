@@ -674,7 +674,12 @@ export const doctorDirectSampleHandover = async (req: AuthRequest, res: Response
     });
   } catch (error: any) {
     console.error('Error registering direct sample handover:', error);
-    res.status(500).json({ error: `Failed to register sample handover: ${error.message || 'Unknown error'}`, details: error.message });
+    let shortMsg = error.message || 'Unknown error';
+    if (typeof shortMsg === 'string' && shortMsg.includes('\\n')) {
+      const lines = shortMsg.split('\\n').filter((l: string) => l.trim() !== '');
+      shortMsg = lines[lines.length - 1];
+    }
+    res.status(500).json({ error: `Failed: ${shortMsg}`, details: error.message });
   }
 };
 
