@@ -22,17 +22,26 @@ export const getAllBranches = async (req: Request, res: Response) => {
 
           if (user && user.role !== 'ADMIN' && user.role !== 'SUPER_ADMIN') {
             let userCity: string | null | undefined = null;
+            let fullAddressStr = '';
+
             if (user.pathologyPartner && user.pathologyPartner.city) {
               userCity = user.pathologyPartner.city;
             } else if (user.role === 'DOCTOR' && user.doctor?.branch?.city) {
               userCity = user.doctor.branch.city;
-            } else if (user.addresses && user.addresses.length > 0 && user.addresses[0].city !== 'Unknown') {
-              userCity = user.addresses[0].city;
+            } else if (user.addresses && user.addresses.length > 0) {
+              if (user.addresses[0].city !== 'Unknown' && user.addresses[0].city !== '') {
+                userCity = user.addresses[0].city;
+              }
+              fullAddressStr = (user.addresses[0].line1 || '').toLowerCase();
             }
 
             if (userCity) {
               branches = branches.filter((b: any) => 
                 b.city && b.city.toLowerCase() === userCity?.toLowerCase()
+              );
+            } else if (fullAddressStr) {
+              branches = branches.filter((b: any) => 
+                b.city && fullAddressStr.includes(b.city.toLowerCase())
               );
             }
           }
