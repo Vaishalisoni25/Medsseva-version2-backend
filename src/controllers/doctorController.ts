@@ -674,7 +674,7 @@ export const doctorDirectSampleHandover = async (req: AuthRequest, res: Response
     });
   } catch (error: any) {
     console.error('Error registering direct sample handover:', error);
-    res.status(500).json({ error: 'Failed to register sample handover', details: error.message });
+    res.status(500).json({ error: `Failed to register sample handover: ${error.message || 'Unknown error'}`, details: error.message });
   }
 };
 
