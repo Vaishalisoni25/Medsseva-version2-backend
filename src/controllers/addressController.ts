@@ -11,16 +11,26 @@ export const getAddresses = async (req: Request, res: Response) => {
     }
 
     const user = await prisma.user.findUnique({
-      where: { mobile: mobile as string }
+      where: { mobile: mobile as string },
+      include: { doctor: { include: { branch: true } } }
     });
 
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    const addresses = await prisma.address.findMany({
+    let addresses = await prisma.address.findMany({
       where: { userId: user.id }
     });
+
+    if (user.role === 'DOCTOR' && user.doctor?.branch?.city) {
+      addresses = addresses.map((a: any) => {
+        if (a.city === 'Unknown' || !a.city) {
+          return { ...a, city: user.doctor!.branch!.city };
+        }
+        return a;
+      });
+    }
 
     res.json(addresses);
   } catch (error) {

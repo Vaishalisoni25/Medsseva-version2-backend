@@ -17,14 +17,16 @@ export const getAllBranches = async (req: Request, res: Response) => {
         if (decoded && decoded.id) {
           const user = await prisma.user.findUnique({
             where: { id: decoded.id },
-            include: { pathologyPartner: true, addresses: true }
+            include: { pathologyPartner: true, addresses: true, doctor: { include: { branch: true } } }
           });
 
           if (user && user.role !== 'ADMIN' && user.role !== 'SUPER_ADMIN') {
             let userCity: string | null | undefined = null;
             if (user.pathologyPartner && user.pathologyPartner.city) {
               userCity = user.pathologyPartner.city;
-            } else if (user.addresses && user.addresses.length > 0) {
+            } else if (user.role === 'DOCTOR' && user.doctor?.branch?.city) {
+              userCity = user.doctor.branch.city;
+            } else if (user.addresses && user.addresses.length > 0 && user.addresses[0].city !== 'Unknown') {
               userCity = user.addresses[0].city;
             }
 
