@@ -128,28 +128,63 @@ export async function getCollectorContext(userId: string): Promise<{
   isApproved: boolean;
   isAvailable: boolean;
 }> {
-  const partner = await prisma.pathologyPartner.findUnique({ where: { userId } });
+  const partner = await prisma.pathologyPartner.findUnique({
+    where: { userId },
+  });
+
+  const adminUser = await prisma.adminUser.findFirst({
+    where: { userId, isActive: true },
+    include: { branch: true, user: { select: { role: true } } },
+  });
+
+  // Priority 1: Collector's own live / saved GPS coordinates
+  let lat: number | null = partner?.latitude ?? adminUser?.latitude ?? null;
+  let lon: number | null = partner?.longitude ?? adminUser?.longitude ?? null;
+
+  // Priority 2 (Secondary Fallback): If collector has no GPS coordinates yet, inherit from parent branch/lab
+  if (!hasValidCoordinates(lat, lon)) {
+    const branch = adminUser?.branch;
+    if (branch && hasValidCoordinates(branch.latitude, branch.longitude)) {
+      lat = branch.latitude;
+      lon = branch.longitude;
+    } else {
+      const targetBranchId = partner?.branchId || adminUser?.branchId;
+      const targetPartnerId = adminUser?.partnerId;
+      if (targetPartnerId) {
+        const parentPartner = await prisma.pathologyPartner.findUnique({ where: { id: targetPartnerId } });
+        if (parentPartner && hasValidCoordinates(parentPartner.latitude, parentPartner.longitude)) {
+          lat = parentPartner.latitude;
+          lon = parentPartner.longitude;
+        }
+      }
+      if (!hasValidCoordinates(lat, lon) && targetBranchId) {
+        const parentLab = await prisma.pathologyPartner.findFirst({
+          where: { branchId: targetBranchId, role: 'LAB_PARTNER' },
+        });
+        if (parentLab && hasValidCoordinates(parentLab.latitude, parentLab.longitude)) {
+          lat = parentLab.latitude;
+          lon = parentLab.longitude;
+        }
+      }
+    }
+  }
+
   if (partner) {
     return {
       partnerId: partner.id,
-      latitude: partner.latitude,
-      longitude: partner.longitude,
+      latitude: lat,
+      longitude: lon,
       radiusKm: partner.serviceRadiusKm ?? DEFAULT_BOOKING_RADIUS_KM,
       isApproved: partner.approvalStatus === 'APPROVED',
       isAvailable: partner.isAvailable,
     };
   }
 
-  const adminUser = await prisma.adminUser.findFirst({
-    where: { userId, isActive: true },
-    include: { user: { select: { role: true } } },
-  });
-
   if (adminUser && adminUser.user.role === 'EXECUTIVE') {
     return {
       partnerId: null,
-      latitude: adminUser.latitude,
-      longitude: adminUser.longitude,
+      latitude: lat,
+      longitude: lon,
       radiusKm: DEFAULT_BOOKING_RADIUS_KM,
       isApproved: true,
       isAvailable: true,
@@ -158,8 +193,8 @@ export async function getCollectorContext(userId: string): Promise<{
 
   return {
     partnerId: null,
-    latitude: null,
-    longitude: null,
+    latitude: lat,
+    longitude: lon,
     radiusKm: DEFAULT_BOOKING_RADIUS_KM,
     isApproved: false,
     isAvailable: false,

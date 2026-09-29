@@ -2076,6 +2076,7 @@ export const getMe = async (req: any, res: Response) => {
     const adminUser = await prisma.adminUser.findUnique({
       where: { userId: user.id },
       include: {
+        branch: true,
         role: {
           include: {
             permissions: { include: { permission: true } },
@@ -2104,6 +2105,21 @@ export const getMe = async (req: any, res: Response) => {
       accessibleModules = ['*'];
     }
 
+    const partnerRecord = await prisma.pathologyPartner.findUnique({ where: { userId: user.id } });
+
+    const isEmployee = Boolean(
+      adminUser &&
+      adminUser.userType !== 'FREELANCER' && (
+        adminUser.userType === 'STAFF' ||
+        adminUser.userType === 'EMPLOYEE' ||
+        adminUser.branchId ||
+        (adminUser.designation && /phlebotomist|collector|staff|employee/i.test(adminUser.designation)) ||
+        (adminUser.department && /phlebotom|sample collection/i.test(adminUser.department))
+      )
+    );
+    const phlebotomistType = isEmployee ? 'EMPLOYEE' : 'FREELANCER';
+    const userType = adminUser?.userType || (isEmployee ? 'EMPLOYEE' : 'FREELANCER');
+
     let userReferralCode = user.referralCode;
     if (!userReferralCode) {
       userReferralCode = await generateUniqueReferralCode();
@@ -2128,11 +2144,26 @@ export const getMe = async (req: any, res: Response) => {
         isFirstTestFreeEligible: user.isFirstTestFreeEligible,
         firstTestFreeUsed: user.firstTestFreeUsed,
         totalReferrals,
+        isEmployee,
+        phlebotomistType,
+        userType,
         branchId: adminUser?.branchId || null,
+        branchName: adminUser?.branch?.name || null,
+        designation: adminUser?.designation || null,
         adminRole: adminRoleName,
         adminRoleSlug,
         permissions,
         accessibleModules,
+        partner: partnerRecord ? {
+          id: partnerRecord.id,
+          labName: partnerRecord.labName,
+          role: partnerRecord.role,
+          approvalStatus: partnerRecord.approvalStatus,
+          isAvailable: partnerRecord.isAvailable,
+          rating: partnerRecord.rating,
+          commissionRate: isEmployee ? 0 : (partnerRecord.commissionRate ?? 30),
+          branchId: partnerRecord.branchId || adminUser?.branchId || null,
+        } : undefined,
       },
     });
   } catch (error: any) {

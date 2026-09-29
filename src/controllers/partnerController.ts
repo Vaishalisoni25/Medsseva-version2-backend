@@ -183,7 +183,12 @@ export const acceptBooking = async (req: any, res: Response) => {
     const existing = await prisma.booking.findUnique({ where: { id } });
     if (!existing) return res.status(404).json({ error: 'Booking not found.' });
 
-    if (existing.addressId) {
+    // Internal branch orders directly assigned to this staff or their lab bypass the open-pool radius restriction
+    const isDirectlyAssignedToCollector =
+      existing.assignedExecutiveId === req.user.id ||
+      (partner && existing.assignedPartnerId === partner.id);
+
+    if (existing.addressId && !isDirectlyAssignedToCollector) {
       const collector = await getCollectorContext(req.user.id);
       const location = await getBookingLocation(existing.addressId);
       const withinRadius = isBookingWithinCollectorRadius(
@@ -470,7 +475,25 @@ export const updateBookingStatus = async (req: any, res: Response) => {
 export const selectDeliveryBranch = async (req: any, res: Response) => {
   try {
     const { id } = req.params;
-    const { branchId } = req.body;
+    let { branchId } = req.body;
+
+    // Auto-resolve branch for in-house employee if branchId omitted or passed as 'auto'
+    if (!branchId || branchId === 'auto') {
+      const booking = await prisma.booking.findUnique({ where: { id } });
+      if (booking?.branchId) {
+        branchId = booking.branchId;
+      } else {
+        const partner = await prisma.pathologyPartner.findUnique({ where: { userId: req.user.id } });
+        if (partner?.branchId) {
+          branchId = partner.branchId;
+        } else {
+          const adminUser = await prisma.adminUser.findFirst({ where: { userId: req.user.id, isActive: true } });
+          if (adminUser?.branchId) {
+            branchId = adminUser.branchId;
+          }
+        }
+      }
+    }
 
     if (!branchId) {
       return res.status(400).json({ error: 'branchId is required.' });
@@ -601,7 +624,60 @@ export const confirmBranchDelivery = async (req: any, res: Response) => {
 
 export const getDeliveryBranches = async (req: any, res: Response) => {
   try {
-    const branches = await prisma.branch.findMany({
+    const { bookingId, city: queryCity } = req.query;
+
+    let targetCity: string | null = (typeof queryCity === 'string' && queryCity.trim()) ? queryCity.trim() : null;
+
+    // 1. If not provided in query, attempt to derive from booking
+    if (!targetCity && bookingId) {
+      const booking = await prisma.booking.findUnique({
+        where: { id: String(bookingId) },
+        select: {
+          addressId: true,
+          branchId: true,
+          branch: { select: { city: true } },
+        },
+      });
+
+      if (booking?.branch?.city) {
+        targetCity = booking.branch.city;
+      } else if (booking?.addressId) {
+        const addr = await prisma.address.findUnique({ where: { id: booking.addressId } });
+        if (addr) {
+          targetCity = addr.city || addr.line1 || null;
+          if (targetCity === 'Unknown') {
+            targetCity = addr.line1 || null;
+          }
+        }
+      }
+    }
+
+    // 2. If still no city, check collector's profile / address
+    if (!targetCity && req.user?.id) {
+      const partner = await prisma.pathologyPartner.findUnique({
+        where: { userId: req.user.id },
+        select: { city: true, address: true, branchId: true },
+      });
+      if (partner?.city) {
+        targetCity = partner.city;
+      } else if (partner?.branchId) {
+        const b = await prisma.branch.findUnique({ where: { id: partner.branchId }, select: { city: true } });
+        if (b?.city) targetCity = b.city;
+      } else if (partner?.address) {
+        targetCity = partner.address;
+      } else {
+        const adminUser = await prisma.adminUser.findFirst({
+          where: { userId: req.user.id, isActive: true },
+          include: { branch: true },
+        });
+        if (adminUser?.branch?.city) {
+          targetCity = adminUser.branch.city;
+        }
+      }
+    }
+
+    // Fetch all active branches
+    const allBranches = await prisma.branch.findMany({
       where: { isActive: true },
       select: {
         id: true,
@@ -616,7 +692,23 @@ export const getDeliveryBranches = async (req: any, res: Response) => {
       },
       orderBy: { name: 'asc' },
     });
-    res.json(branches);
+
+    // If targetCity is found, strictly filter branches belonging to that city
+    let filteredBranches = allBranches;
+    if (targetCity) {
+      const cleanTarget = targetCity.toLowerCase();
+      const matched = allBranches.filter(b => {
+        if (!b.city) return false;
+        const bCity = b.city.toLowerCase().trim();
+        return cleanTarget.includes(bCity) || bCity.includes(cleanTarget);
+      });
+
+      if (matched.length > 0) {
+        filteredBranches = matched;
+      }
+    }
+
+    res.json(filteredBranches);
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to fetch branches', details: error.message });
   }
@@ -893,17 +985,30 @@ await prisma.bookingStatusLog.create({
 
 export const toggleAvailability = async (req: any, res: Response) => {
   try {
-    const { isAvailable } = req.body;
+    const { isAvailable, latitude, longitude } = req.body;
     if (typeof isAvailable !== 'boolean') {
       return res.status(400).json({ error: 'isAvailable must be a boolean.' });
     }
 
-    const partner = await prisma.pathologyPartner.update({
+    const updateData: any = { isAvailable };
+    if (latitude != null && longitude != null && !isNaN(Number(latitude)) && !isNaN(Number(longitude))) {
+      updateData.latitude = Number(latitude);
+      updateData.longitude = Number(longitude);
+    }
+
+    await prisma.pathologyPartner.updateMany({
       where: { userId: req.user.id },
-      data: { isAvailable },
+      data: updateData,
     });
 
-    res.json({ isAvailable: partner.isAvailable });
+    if (updateData.latitude != null) {
+      await prisma.adminUser.updateMany({
+        where: { userId: req.user.id },
+        data: { latitude: updateData.latitude, longitude: updateData.longitude },
+      });
+    }
+
+    res.json({ isAvailable });
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to update availability', details: error.message });
   }

@@ -58,6 +58,10 @@ export const getMe = async (req: AuthRequest, res: Response) => {
       )
     );
 
+    const partnerRecord = await prisma.pathologyPartner.findUnique({
+      where: { userId: user.id },
+    });
+
     res.json({
       id: user.id,
       name: user.name,
@@ -80,6 +84,16 @@ export const getMe = async (req: AuthRequest, res: Response) => {
       designation: adminUser?.designation || null,
       adminRole: adminUser?.role?.name || null,
       adminRoleSlug: adminUser?.role?.slug || null,
+      partner: partnerRecord ? {
+        id: partnerRecord.id,
+        labName: partnerRecord.labName,
+        role: partnerRecord.role,
+        approvalStatus: partnerRecord.approvalStatus,
+        isAvailable: partnerRecord.isAvailable,
+        rating: partnerRecord.rating,
+        commissionRate: isEmployee ? 0 : (partnerRecord.commissionRate ?? 30),
+        branchId: partnerRecord.branchId || adminUser?.branchId || null,
+      } : undefined,
     });
   } catch (error: any) {
     console.error('Error fetching user profile:', error);
